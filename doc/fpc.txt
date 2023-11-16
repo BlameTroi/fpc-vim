@@ -1,0 +1,288 @@
+*fpc.txt*          fpc (Pascal) syntax plugin for Vim and Neovim
+
+                    SHORT REFERENCE MANUAL FOR FPC-VIM
+==============================================================================
+CONTENTS                                                        *fpc-contents*
+
+INTRODUCTION................................................|fpc-introduction|
+OVERVIEW........................................................|fpc-overview|
+BUGS................................................................|fpc-bugs|
+INSTALL..........................................................|fpc-install|
+SETTINGS........................................................|fpc-settings|
+HIGHLIGHT SETTINGS....................................|fpc-highlight-settings|
+COMMANDS........................................................|fpc-commands|
+MAPPINGS........................................................|fpc-mappings|
+FOLDING..........................................................|fpc-folding|
+INDENTATION..................................................|fpc-indentation|
+MATCHIT SUPPORT..................................................|fpc-matchit|
+TAG HANDLING................................................|fpc-tag-handling|
+SNIPPETS........................................................|fpc-snippets|
+MAKE................................................................|fpc-make|
+
+==============================================================================
+INTRODUCTION                                                 *fpc-introduction*
+
+Disclaimer: This is still in development and I've never written a Vim plugin
+            or Vim documentation until now. Apologies in advance for any
+            errors and feel free to point out anything I can improve.
+
+This plugin provides Vim compile, syntax, indent and filetype detection for
+objfpc mode of Pascal (aka. objfpc) files using the Free Pascal 3.2.2
+compiler.
+
+This plugin is written in Vimscript to be portable between both Vim and
+Neovim. All the cool kids may want to use Lua, but I'm not a cool kid. I'd
+rather write once run anywhere.
+
+Development was done on Windows 11 with current releases of both Neovim and
+Vim.
+
+Test Files: Pascal source snippets and files for testng and bug duplication
+            are in the testing subdirectory. While this directory is in the
+            plugin structure, it contains no Vimscript source and is not
+            required. Once this plugin is more complete, the directory will
+            be removed.
+
+You can get the latest version of vim-fpc or report a bug on GitHub:
+
+http://github.com/BlameTroi/vim-fpc
+
+==============================================================================
+OVERVIEW                                                         *fpc-overview*
+
+Code formatting is a local cultural norm. Rules regarding placement of curly
+braces in C-like languages have equivalents in Pascal and ALGOL regarding
+`begin` and `end`. It isn't practical to support all possibilities.
+
+The purpose of this plugin is to reasonably assist in editing of existing
+code and creation of new code. It is not intended that it be used to
+completely format a full Pascal source file from scratch, though it will
+certainly do that.
+
+Note that this plugin uses a textual, not semantic nor even remotely
+syntactic, process. There are no ASTs here, just text matching and
+counting.
+
+A proper formatter descended from the PTOP program is planned and would be
+used in the same manner as GOFMT, though with more flexability.
+
+The indenting/formatting process:
+
+* In normal editing, the `ObjfpcGetIndent()` function is not called unless
+  you override the 'indentkeys' setting. <C-F> while in input mode will
+  indent the current line. `=` in normal mode will also indent the current
+  line. In visual mode it will indent the selection.
+
+  'autoindent', 'copyindent', and 'cindent' are set so that the prior
+  line's indent is used while inserting text.
+
+* No lines will be split or joined by the indent process. While I think
+  there are right way and wrong ways to position `begin`-`end`, the existing
+  style is kept.
+
+* Comments in source code:
+
+  * Both Pascal standard comment block markers and C++ style `//` line
+    comments are supported.
+
+  * Comments may not be nested.
+
+  * While the Pascal standard allows a mixing of block marker pairs, this
+    plugin does not.
+>
+      { don't do this *)
+<
+  * A line that begins with a comment is a comment line, even if it contains
+    code after the comment.
+>
+      { this is the } end;
+<
+    is bad style. Don't do it.
+
+  * Comment lines are not indented.
+
+  * Block comments may span multiple lines.
+
+  * Code may preceed a comment on a line and the entire line can be
+    indented, but spacing between code and the start of the comment is
+    unchanged.
+
+* Compiler and preprocessor directives are entered as comments in
+  Free Pascal, Delphi, and other compilers. The following rules govern
+  recognition of these directives:
+
+  * They should be enclosed in standard block comment markers. C++
+    style comments are not recognized as directives.
+
+  * Free Pascal uses a $ prefix in the comment text to denote a
+    directive. For example: `{$mode objfpc}` .
+
+  * This plugin uses a ## prefix in the comment text to denote a
+    directive. At present the only directive is to turn indent
+    on or off. For example: `(*##indent:off*)` .
+
+* Compiler and preprocessor directive comments are indented to the
+  far left but do not change the indent of subsequent lines.
+
+* Certain keywords always reset indenting to the left margin. A partial
+  list includes:
+>
+    procedure, function, uses, unit, implementation, interface,
+    const, type, var, label, 'end.'
+<
+* Certain keywords always increase indent by one level. a partial list
+  includes:
+>
+     begin, repeat, for, case, while, do, if, else
+<
+
+  But in a case such as 'with var^ do begin' the indent increases only
+  by one level, regardless of layout. The following are all equivalent:
+>
+    with var^ do begin      with var ^ do     with var^
+      stmt                  begin             do begin
+    end                       stmt              stmt
+                            end               end
+<
+* certain keywords always decrease indent by one level:
+>
+    end, until
+<
+* Otherwise, copy the prior non-comment line's indent level.
+
+==============================================================================
+BUGS                                                                 *fpc-bugs*
+
+* does not use deferred loading or autoload yet.
+
+* destroys foratting of lucid or literate function/procedure headers.
+>
+    function somefunc(var v: modifiable;
+                          s: string) : boolean;
+<
+  becomes:
+>
+    function somefunc(var v: modifiable;
+    s: string) : boolean;
+<
+  circumvent by wrapping in `{##indent:off/on}`.
+
+* `if`/`then`/`else` and pretty much anything/`do` don't properly recognize the
+  end of single statement clauses resulting in missed outdenting.
+>
+    for i := 1 to 3 do
+      for j := 1 to 3 do begin
+        writeln(i:4,j:4)
+      end;
+    writeln('i should line up under for i');
+<
+  becomes:
+>
+    for i := 1 to 3 do
+      for j := 1 to 3 do begin
+        writeln(i:4,j:4)
+      end;
+      writeln('i should line up under for i');
+<
+  is just one example. gratuitous use of begin-end circumvents.
+
+==============================================================================
+INSTALL                                                           *fpc-install*
+
+Install using the plugin manager of your choice. Development and testing was
+done using Neovim and vim-plug but there are no Neovim dependencies.
+
+The objfpc plugin will be loaded automatically if you open a *.pas *.pp or *.p
+file, overriding the default assignment of these filetypes to the built in
+Pascal support.
+
+You can load it manually by typing: >
+
+  :set filetype=fpc
+
+==============================================================================
+SETTINGS                                                         *fpc-settings*
+
+There are as yet no settings in this plugin. Vim values for autoindent
+behavior are altered for the edit buffer only. Tab spacing, width, and
+expansion use the active vim settngs.
+
+==============================================================================
+HIGHLIGHT SETTINGS                                     *fpc-highlight-settings*
+
+To be provided.
+
+==============================================================================
+COMMANDS                                                         *fpc-commands*
+
+Beyond setting makeprg for :make, commands `:DMSG`, `:DMSGOn`, `:DMSGOff`, and
+`:DMSGToggle` are added but will be removed in the future. `:DMSG` takes a string
+and writes it to :messages via :echomsg if `g:DMSG_flag` is truthy.
+
+==============================================================================
+MAPPINGS                                                         *fpc-mappings*
+
+None as of yet.
+
+==============================================================================
+FOLDING                                                           *fpc-folding*
+
+No folding support is planned.
+
+==============================================================================
+MATCHIT SUPPORT                                                   *fpc-matchit*
+
+Matchit plugin is supported by defining |b:match_words| variable. The user can
+switch between `begin`/`record`/`case` etc. and the corresponding `end`
+with `%`.
+
+More info about matchit features can be found in |matchit.txt|. Matchit is part
+of the standard Vim installation, but it must be activated. For instructions
+type: >
+
+  :help matchit-install
+
+Matchit is enabled by default in Neovim.
+
+If you use Tim Pope's vim-sensible plugin, it enables Matchit as well.
+https://github.com/tpope/vim-sensible
+
+==============================================================================
+INDENTATION                                                   *fpc-indentation*
+
+`gg=G`                Indents the whole file
+`=`                   Indents the current line
+
+==============================================================================
+TAG HANDLING                                                 *fpc-tag-handling*
+
+To be provided.
+
+==============================================================================
+SNIPPETS                                                         *fpc-snippets*
+
+To be provided.
+
+==============================================================================
+MAKE                                                                 *fpc-make*
+
+The `compiler\objfpc.vim` file sets the makeprg to `fpc %` . Invoking `:make` will
+run the fpc compiler and show any errors in the quickfix window.
+
+Default options and paths are set in the `fpc.cfg` file, which is created during
+the install of Free Pascal. The only compiler option that effects the `:make`
+process is `-vb`, for verbose output with full paths to files in messages.
+
+The fpc compiler is smart enough to use its own gcc tool chain when run on
+Windows, but if you may need to change your path around to use a gdb other
+than the one provided with fpc.
+
+More documentation on options can be found in the The Free Pascal User's
+Guide:
+
+https://www.freepascal.org/docs-html/user/user.html
+
+See the Free Pascal project site and wiki for more information.
+
+------------------------------------------------------------------------------
+vim:tw=79:ts=8:ft=help:norl:

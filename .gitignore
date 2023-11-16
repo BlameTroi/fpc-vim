@@ -1,0 +1,6 @@
+TAGS
+*.ppu
+*.o
+*.exe
+*.log
+indented*.pas
