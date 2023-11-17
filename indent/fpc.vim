@@ -223,6 +223,36 @@ function! g:FpcGetIndent(of_line)
     return curr_indent == prev_indent ? -1 : prev_indent
   endif
 
+  " if then else with then and else leading lines. else usually
+  " leads, then does not.
+
+  " then
+  if curr_line =~ '\v\c<then>' && curr_line !~ '\v\c.*<if>.*<then>'
+    DMSG printf("FpcGetIndent: then seeking matching if from line: %d '%s'", curr_num, curr_line)
+    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<if>', '\v\c<then>')
+    let prev_line = getline(prev_num)
+    let prev_indent = indent(prev_num)
+    return curr_indent == prev_indent ? -1 : prev_indent
+  endif
+
+  " else
+  if curr_line =~ '\v\c<else>' && curr_line !~ '\v\c.*<end>\s+<else>'
+    DMSG printf("FpcGetIndent: then seeking matching if from line: %d '%s'", curr_num, curr_line)
+    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<if>', '\v\c<else>')
+    let prev_line = getline(prev_num)
+    let prev_indent = indent(prev_num)
+    return curr_indent == prev_indent ? -1 : prev_indent
+  endif
+
+  " the do is a lot like the else and then. 
+  if curr_line =~ '\v\c<do>' && curr_line !~ '\v\c.*<(for|while|with)>.*<do>'
+    DMSG printf("FpcGetIndent: do seeking matching for|while|with from line: %d '%s'", curr_num, curr_line)
+    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<(for|while|with)>', '\v\c<do>')
+    let prev_line = getline(prev_num)
+    let prev_indent = indent(prev_num)
+    return curr_indent == prev_indent ? -1 : prev_indent
+  endif
+
   " look back to the prior code line to get the indent for the
   " current line. some of those code lines indent this line.
   " including the various parts of some statements (then and
