@@ -217,9 +217,9 @@ function! g:FpcGetIndent(of_line)
   " properly handle the many arrangements of things such as
   " if-then-begin-end-else ...
   let prev_num = g:FpcGetPrior(curr_num)
-  let prev_line = getline(prev_num)
+  let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_num)))
   let prev_indent = indent(prev_num)
-  if prev_line =~ '\v\c<(begin|label|const|type|var|if|for|while|with|repeat|case|record|do|then|else)>'
+  if prev_line =~ '\v\c<(begin|label|const|type|var|if|for|while|with|repeat|case|record|do|then|else|uses)>'
     return curr_indent == prev_indent + &shiftwidth ? -1 : prev_indent + &shiftwidth
   endif
   return curr_indent == prev_indent ? -1 : prev_indent

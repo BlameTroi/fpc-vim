@@ -27,8 +27,7 @@ Disclaimer: This is still in development and I've never written a Vim plugin
             errors and feel free to point out anything I can improve.
 
 This plugin provides Vim compile, syntax, indent and filetype detection for
-objfpc mode of Pascal (aka. objfpc) files using the Free Pascal 3.2.2
-compiler.
+objfpc mode of Pascal files using the Free Pascal 3.2.2 compiler.
 
 This plugin is written in Vimscript to be portable between both Vim and
 Neovim. All the cool kids may want to use Lua, but I'm not a cool kid. I'd
@@ -68,7 +67,7 @@ used in the same manner as GOFMT, though with more flexability.
 
 The indenting/formatting process:
 
-* In normal editing, the `ObjfpcGetIndent()` function is not called unless
+* In normal editing, the `FpcGetIndent()` function is not called unless
   you override the 'indentkeys' setting. <C-F> while in input mode will
   indent the current line. `=` in normal mode will also indent the current
   line. In visual mode it will indent the selection.
@@ -135,7 +134,6 @@ The indenting/formatting process:
 >
      begin, repeat, for, case, while, do, if, else
 <
-
   But in a case such as 'with var^ do begin' the indent increases only
   by one level, regardless of layout. The following are all equivalent:
 >
@@ -192,7 +190,7 @@ INSTALL                                                           *fpc-install*
 Install using the plugin manager of your choice. Development and testing was
 done using Neovim and vim-plug but there are no Neovim dependencies.
 
-The objfpc plugin will be loaded automatically if you open a *.pas *.pp or *.p
+The fpc plugin will be loaded automatically if you open a *.pas *.pp or *.p
 file, overriding the default assignment of these filetypes to the built in
 Pascal support.
 
@@ -266,7 +264,7 @@ To be provided.
 ==============================================================================
 MAKE                                                                 *fpc-make*
 
-The `compiler\objfpc.vim` file sets the makeprg to `fpc %` . Invoking `:make` will
+The `compiler\fpc.vim` file sets the makeprg to `fpc %` . Invoking `:make` will
 run the fpc compiler and show any errors in the quickfix window.
 
 Default options and paths are set in the `fpc.cfg` file, which is created during

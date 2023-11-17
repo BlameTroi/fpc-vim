@@ -56,7 +56,7 @@ then writeln(i);
 writeln('should outdent');
 end;
 
-{ there's only one variety of repeat laouts }
+{ there is only one variety of repeat layout }
 
 procedure repeat001(i, j: integer);
 begin
