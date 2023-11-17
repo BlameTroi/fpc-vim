@@ -89,13 +89,13 @@ function! g:FpcGetIndent(of_line)
   let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
 
   " first line or invalid line always indent 0
-  if curr_num < 2 || cur_num > line('$')
+  if curr_num < 2 || curr_num > line('$')
     return 0
   endif
 
   let curr_line = getline(curr_num)
 
-  " let g:DMSG_flag = b:in_comment || (curr_num >= 35 && curr_num <= 38)
+  "let g:DMSG_flag = b:in_comment || (curr_num >= 25 && curr_num <= 35)
 
   " format/indent directives {##indent:on|off} can turn off
   " indent processing for a block of lines. defaults to on.
@@ -124,9 +124,9 @@ function! g:FpcGetIndent(of_line)
 
   " check was failing when open was not closed after code, as in
   " 'do begin { ...'
-  DMSG printf("fpc-indent: past !indenting check at line %d", curr_num)
+  "DMSG printf("fpc-indent: past !indenting check at line %d", curr_num)
   if curr_line =~ '\v^\.*(\{|\(\*)' && curr_line !~ '\v(\}|\*\))'
-    if b:in_coment
+    if b:in_comment
       echomsg "ERROR, already in comment at " .. curr_num .. ":" curr_line
     endif
     DMSG printf("fpc-indent: start comment block at line: %d, '%s'", curr_num, curr_line)
@@ -135,7 +135,7 @@ function! g:FpcGetIndent(of_line)
     let b:in_comment = 1
     return -1
   endif
-  if !b:in_coment && curr_line =~ '\v(\}|\*\))'
+  if !b:in_comment && curr_line =~ '\v(\}|\*\))'
       echomsg "ERROR, already in comment at " .. curr_num .. ":" curr_line
     endif
   if b:in_comment && curr_line =~ '\v(\}|\*\))'
@@ -179,14 +179,12 @@ function! g:FpcGetIndent(of_line)
   " check here is for begin at start of line, the pattern sent
   " for pair searching is for begin anywhere.
   if curr_line =~ '\v\c^\s*begin>'
-    let g:DMSG_flag = 1
     DMSG printf("fpc-indent: leading/only begin seeking correct prior line for indent from line: %d, '%s'", curr_num, curr_line)
     let prev_num = g:FpcGetPriorPair(curr_num,
           \ '\v\c<(program|procedure|function|var|type|const|label|if|then|else|while|do|with)>',
           \ '\v\c<begin>')
     let prev_line = getline(prev_num)
     let prev_indent = indent(prev_num)
-    let g:DMSG_flag = 0
     return curr_indent == prev_indent ? -1 : prev_indent
   endif
 
@@ -195,10 +193,13 @@ function! g:FpcGetIndent(of_line)
   "   end -- begin/case/record
   "   until -- repeat
   if curr_line =~ '\v\c<end>'
+    DMSGOn
     DMSG printf("fpc-indent: end seeking matching begin-case-record from line: %d '%s'", curr_num, curr_line)
     let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<(begin|record|case)>', '\v\c<end>')
     let prev_line = getline(prev_num)
     let prev_indent = indent(prev_num)
+    DMSG printf("fpc-indent: using line %d for 'end' at line %d", prev_num, curr_num)
+    DMSGOff
     return curr_indent == prev_indent ? -1 : prev_indent
   endif
 
@@ -232,7 +233,7 @@ endfunction
 " comments or indent supression.
 " -------------------------------------------------------------------
 
-  let s:match_boundary_line = '\v\c^\s*((procedure|function|label|var|program|unit|uses|const|type|interface|implementation|initialization|finalization)>|end\.)'
+let s:match_boundary_line = '\v\c^\s*((procedure|function|label|var|program|unit|uses|const|type|interface|implementation|initialization|finalization)>|end\.)'
 
 function! g:FpcGetBacktrackBoundary(of_line)
   let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
@@ -241,12 +242,13 @@ function! g:FpcGetBacktrackBoundary(of_line)
   endif
   let save_cursor = getcurpos()
   call cursor(curr_num, 1)
-  let prior_num = search(s:match_boundary_line, "bW")
-  if prior_num == 0
-    DMSG printf("fpc-indent: could not find boundary for line: %d", curr_num)
-  else
-   DMSG printf("fpc-indent: found boundary for line: %d at line %d", curr_num, prior_num)
-  endif
+" search({pattern} [, {flags} [, {stopline} [, {timeout} [, {skip}]]]])
+  let prior_num = search(s:match_boundary_line, "bW", 0, 1000, g:FpcSearchSkipFuncref)
+"  if prior_num == 0
+"    DMSG printf("fpc-indent: could not find boundary for line: %d", curr_num)
+"  else
+"    DMSG printf("fpc-indent: found boundary for line: %d at line %d", curr_num, prior_num)
+"  endif
   call cursor(save_cursor[1], save_cursor[2])
   return prior_num
 endfunction
@@ -339,7 +341,15 @@ endfunction
 
 " -------------------------------------------------------------------
 " match pairs
+"
+" switching from searchpair() to searchpairpos() so i can avoid
+" false positives in comments.
 " -------------------------------------------------------------------
+function! g:FpcSearchSkip()
+  return synIDattr(synID(line("."),col("."),1),"name") =~? '\v\c(fpcString|fpcComment)'
+endfunction
+let g:FpcSearchSkipFuncref = funcref("g:FpcSearchSkip")
+
 function g:FpcGetPriorPair(of_line, match_open, match_close)
   let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
   if curr_num == 0
@@ -363,11 +373,11 @@ function g:FpcGetPriorPair(of_line, match_open, match_close)
   " prime the pump
   let where_matched = searchpair(
         \ search_pair_start, search_pair_middle, search_pair_end,
-        \ "bW", "", stop_search)
+        \ "bW", g:FpcSearchSkipFuncref, stop_search)
   DMSG printf("fpc-indent: result of of first searchpair from: %d at: %d '%s'",
         \ search_from, where_matched, getline(where_matched))
   while where_matched
-    if getline(where_matched) =~ search_pair_end
+    if g:FpcStripComments(g:FpcStripStrings(getline(where_matched))) =~ search_pair_end
       let nesting = nesting + 1
       DMSG printf("fpc-indent: nesting+: %d at: %d", nesting, where_matched)
     else
@@ -380,7 +390,7 @@ function g:FpcGetPriorPair(of_line, match_open, match_close)
     endif
     let where_matched = searchpair(
           \ search_pair_start, search_pair_middle, search_pair_end,
-          \ "bW", "", stop_search)
+          \ "bW", g:FpcSearchSkipFuncref, stop_search)
     if where_matched > 0
       DMSG printf("fpc-indent: result of searchpair %d '%s'",
             \ where_next, getline(where_next))

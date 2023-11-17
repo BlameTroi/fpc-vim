@@ -30,7 +30,7 @@ s.screen[r][c] := '*';
 end;
 end;
 
-{ note both if have compount statements }
+{ note both if have compound statements }
 function preset(s: mod2screen; r, c: integer): char;
 begin
 preset := 'E';
