@@ -16,7 +16,7 @@
 " ===========================================================================
 
 
-if exists("b:current_syntax")
+if exists('b:current_syntax')
   finish
 endif
 
@@ -86,11 +86,26 @@ syntax match fpcIdentifier "\<[a-zA-Z_][a-zA-Z0-9_]*\>"
 
 " grouping based on the standard and then layering extensions on top
 " highlighting by function leads to gratuitous colors
-syntax keyword fpcWord array begin case const do downto
-syntax keyword fpcWord else end file for function goto if
-syntax keyword fpcWord label of packed procedure program
-syntax keyword fpcWord record repeat set then to type
-syntax keyword fpcWord until var while with
+"
+syntax keyword fpcBoundary interface implementation
+syntax keyword fpcBoundary initialization finalization
+syntax keyword fpcDefinition program unit procedure function
+syntax keyword fpcDefinition label const type var
+syntax keyword fpcBegin   begin
+syntax keyword fpcCase    case
+syntax keyword fpcDo      do
+syntax keyword fpcElse    else
+syntax keyword fpcEnd     end
+syntax keyword fpcFor     for
+syntax keyword fpcIf      if
+syntax keyword fpcRepeat  repeat
+syntax keyword fpcThen    then
+syntax keyword fpcUntil   until
+syntax keyword fpcWhile   while
+syntax keyword fpcWith    with
+
+syntax keyword fpcWord array downto file goto of packed record
+syntax keyword fpcWord set to
 syntax keyword fpcDirective forward
 syntax keyword fpcConstant true false maxint nil
 syntax keyword fpcType boolean char integer real
@@ -110,8 +125,6 @@ syntax keyword fpcIO get put page
 
 
 " obvious non-optional extensions
-syntax keyword fpcExtDirective finalization implementation
-syntax keyword fpcExtDirective initialization interface unit uses
 syntax keyword fpcExtDirective class private public protected published
 syntax keyword fpcExtDirective property static abstract virual dynamic
 syntax keyword fpcExtDirective override overload
@@ -142,6 +155,26 @@ highlight default link fpcWord Keyword
 highlight default link fpcDelimiter Delimiter
 
 
+" these are more fine grained for use in synIDattr suppported
+" search skips.
+highlight default link fpcComment keyword
+highlight default link fpcBoundary keyword
+highlight default link fpcBoundary keyword
+highlight default link fpcDefinition keyword
+highlight default link fpcBegin keyword
+highlight default link fpcCase keyword
+highlight default link fpcDo keyword
+highlight default link fpcElse keyword
+highlight default link fpcEnd keyword
+highlight default link fpcFor keyword
+highlight default link fpcIf keyword
+highlight default link fpcRepeat keyword
+highlight default link fpcThen keyword
+highlight default link fpcUntil keyword
+highlight default link fpcWhile keyword
+highlight default link fpcWith keyword
+
+
 " extensions, currently they get the same as the standard or base
 " items
 highlight default link fpcExtConstant Constant
@@ -157,7 +190,7 @@ highlight default link fpcTodo Todo
 
 
 " and that's a wrap
-let b:current_syntax = "fpc"
+let b:current_syntax = 'fpc'
 
 let &cpo = s:save_cpo
 unlet s:save_cpo

@@ -25,8 +25,8 @@ set cpo&vim
 
 " load in a minimal DMSG if we don't see one
 " txb: autoload or not, as it's global?
-if !exists(":DMSG")
-  echomsg "fpc-vim: DMSG not found, defining minimal."
+if !exists(':DMSG')
+  echomsg 'fpc-vim: DMSG not found, defining minimal.'
 
   let g:DMSG_flag = 0
 

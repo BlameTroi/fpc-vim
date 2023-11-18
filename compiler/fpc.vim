@@ -8,7 +8,7 @@
 " ===========================================================================
 
 
-if exists("current_compiler")
+if exists('current_compiler')
   finish
 endif
 
@@ -19,9 +19,9 @@ set cpo&vim
 
 " backfill older vims so we can use the prefered :CompilerSet
 " command. see :help :CompilerSet for more information.
-let current_compiler = "fpc"
+let current_compiler = 'fpc'
 
-if exists(":CompilerSet") != 2  " older Vim always used :setlocal
+if exists(':CompilerSet') != 2  " older Vim always used :setlocal
   command -nargs=* CompilerSet setlocal <args>
 endif
 

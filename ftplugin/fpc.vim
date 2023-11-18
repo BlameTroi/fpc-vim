@@ -8,7 +8,7 @@
 " ===========================================================================
 
 " do this only once
-if exists("b:did_ftplugin")
+if exists('b:did_ftplugin')
 	finish
 endif
 let b:did_ftplugin = 1
@@ -77,7 +77,7 @@ let b:undo_ftplugin .= "setlocal noexpandtab< foldmethod< copyindent< autoindent
 " spot the various case selections, you've got problems beyond
 " needing something like matchit.
 " -------------------------------------------------------------------
-if exists("loaded_matchit")
+if exists('loaded_matchit')
   " case is not significant in pascal
   let b:match_ignorecase = 1
 	" startline pattern
@@ -97,7 +97,7 @@ if exists('b:undo_ftplugin') && !empty(b:undo_ftplugin)
 else
   let b:undo_ftplugin = ''
 endif
-let b:undo_ftplugin .= "unlet! b:match_words"
+let b:undo_ftplugin .= 'unlet! b:match_words'
 
 
 " -------------------------------------------------------------------
