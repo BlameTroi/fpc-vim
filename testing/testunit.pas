@@ -1,4 +1,5 @@
 program testunit;
+{ a comment }
 
 procedure test0000(a: integer; b: string);
 var
@@ -6,6 +7,7 @@ var
 begin
   for i := 1 to a do
   begin
+    { and another comment }
     writeln(b);
   end;
 end;
