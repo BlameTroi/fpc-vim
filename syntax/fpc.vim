@@ -109,6 +109,7 @@ syntax keyword fpcThen            then
 syntax keyword fpcType            type
 syntax keyword fpcUnit            unit
 syntax keyword fpcUntil           until
+syntax keyword fpcUses            uses
 syntax keyword fpcVar             var
 syntax keyword fpcWhile           while
 syntax keyword fpcWith            with
@@ -195,6 +196,7 @@ highlight default link fpcThen            keyword
 highlight default link fpcType            keyword
 highlight default link fpcUnit            keyword
 highlight default link fpcUntil           keyword
+highlight default link fpcUses            keyword
 highlight default link fpcVar             keyword
 highlight default link fpcWhile           keyword
 highlight default link fpcWith            keyword

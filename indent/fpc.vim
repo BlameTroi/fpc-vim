@@ -51,11 +51,6 @@ set cpo&vim
 function g:FpcInitBufferVars()
   let b:indenting = 1
   let b:last_indent_request = -1
-  " txb: set to 1 to enable DMSG throughout
-  "      or do selectively in functions around
-  "      trouble spots. DMSGOn and DMSGOff work
-  "      there too.
-  let g:DMSG_flag = 1
 endfunction
 
 
@@ -81,6 +76,11 @@ setlocal indentexpr=g:FpcGetIndent(v:lnum)
 " hope that 'reusing' the highlighter's pattern matches is faster
 " and more accurate that doing new pattern matches.
 "
+" following removed for debugging, but i may add back later:
+"
+"   return curr_indent == desired_indent ? -1 : desired_indent
+" replaced with
+"   return desired_indent
 " the ternary expression return is an optimistic optimization in
 " the hope that it might save vim/nvim a few cycles.
 " ------------------------------------------------------------------
@@ -110,14 +110,14 @@ function! g:FpcGetIndent(for_num)
   " (hopefully) when a new full indent pass is started.
   if g:FpcIsPreprocessing(curr_num, curr_line)
     call g:FpcIndentOffOnFlagging(curr_num, curr_line)
-    return curr_indent == 0 ? -1 : 0
+    return 0
   endif
 
   " a lines indent is unchanged if indenting is off, it is a
   " comment, or it is blank
   if !b:indenting ||
-        \ g:FpcIsComment(curr_num) ||
-        \ curr_line =~# '\v(^$|^\s*$)' 
+        \ curr_line =~# '\v(^$|^\s*$)' ||
+        \ g:FpcIsComment(curr_num)
     return -1
   endif
 
@@ -132,12 +132,12 @@ function! g:FpcGetIndent(for_num)
   " these lines all have hard left justification and are boundary
   " lines when looking backward for indent guidance.
   if g:FpcIsBoundaryWord(curr_word)
-    return curr_indent == 0 ? -1 : 0
+    return 0
   endif
 
-  " indenting drives off a prior line. sometimes it's the
-  " line immediately prior, others it's a specific line 
-  " but we'll start with the line immediately prior.
+  " indenting drives off a prior line. sometimes it's the line
+  " immediately prior, others it's a specific line but we'll
+  " start with the line immediately prior.
   let prev_num = g:FpcGetPrior(curr_num)
   let prev_word = g:FpcGetFirstWord(prev_num)
   let prev_indent = indent(prev_num)
@@ -147,64 +147,76 @@ function! g:FpcGetIndent(for_num)
   " should line up under repeat.
 
   " every end has its beginning
-  " txb: and record, but ignoring that for now.
-  if curr_word =~# 'fpcEnd'
+  "  or record ...
+  if curr_word =~# '\vfpc(End|Then|Else|Until)'
     let prev_num = g:FpcGetPriorPair(curr_num, curr_word)
-    " *** debug *** let prev_word = g:FpcGetFirstWord(prev_num)
+    let prev_word = g:FpcGetFirstWord(prev_num)
     let prev_indent = indent(prev_num)
-    return curr_indent == prev_indent - &shiftwidth
-          \ ? -1
-          \ : prev_indent - &shiftwidth
+    "echomsg printf('FpcGetIndent: %s at: %d found prior: %s at: %d indent: %d', curr_word, curr_num, prev_word, prev_num, prev_indent)
+    return prev_indent
   endif
 
-  " every until has its repeat
-  if curr_word =~# 'fpcUntil'
-    let prev_num = g:FpcGetPriorPair(curr_num, curr_word)
-    " *** debug *** let prev_word = g:FpcGetFirstWord(prev_num)
-    let prev_indent = indent(prev_num)
-    return curr_indent == prev_indent - &shiftwidth
-          \ ? -1
-          \ : prev_indent - &shiftwidth
-  endif
 
   " begin shows up all over the code, but basically lines up
   " under the statement it provides a grouping for. if, for, etc.
-  if curr_word ==# 'fpcBegin'
-    while !g:FpcIsBoundaryLine(prev_num) && prev_word !~# '\vfpc(For|While|If|Then|Else|With|Do|End)'
+  " fpcDo is deliberately excluded. stmt<nl>do<nl>begin<nl>...
+  " is poor style.
+  if curr_word ==# 'fpcBegin' 
+    while prev_word !~# '\vfpc(For|While|If|Then|Else|With|End)' && !g:FpcIsBoundaryLine(prev_num)
       let prev_num = g:FpcGetPrior(prev_num)
       let prev_word = g:FpcGetFirstWord(prev_num)
       let prev_indent = indent(prev_num)
     endwhile
-    return curr_indent == prev_indent ? -1 : prev_indent
+    return prev_indent
   endif
 
   " if the line does not begin with an indenting word, it is
   " likely either a continuation line or the start of a statement
   " which should be a function call or an assignment.
   "
+  " unfortunately, record definitions need to trigger an indent
+  " and they pretty much never the first word on a line. some
+  " uglieness is required.
+
+  if !g:FpcIsIndentingWord(prev_word) && g:FpcStripComments(g:FpcStripStrings(getline(prev_num))) =~? '\v<record$'
+    let prev_word = 'fpcRecord'
+  endif
+
   " take the indent of the prior code line if the prior line is
   " also not an indenting word. Otherwise, things get more 
   " interesting.
   if !g:FpcIsIndentingWord(prev_word)
-    return curr_indent == prev_indent ? -1 : prev_indent
+    return prev_indent
   endif
 
   " these aren't really indenting words at this point.
   if prev_word =~# '\vfpc(End|Until)'
-    return curr_indent == prev_indent ? -1 : prev_indent
+    return prev_indent
   endif
 
   " these words indent one level. while multiple could be on
-  " any one line, the indent is only one level.
-  if prev_word =~# '\vfpc(Begin|Label|Const|Type|Var|If|For|While|With|Repeat|Case|Then|Else|Uses|Record)'
-    return curr_indent == prev_indent + &shiftwidth
-          \ ? -1
-          \ : prev_indent + &shiftwidth
+  " any one line, the indent is only one level. record, then,
+  " do, else should usually be on the same line as the
+  " statement they are a part of, while-do, if-then, and so
+  " on. however, they may appear as the first word of a line
+  " so we handle them here as well.
+  if prev_word =~# '\vfpc(Begin|Label|Const|Type|Var|If|For|While|With|Repeat|Case|Then|Else|Uses|Record|Do)'
+    return prev_indent + &shiftwidth
+  endif
+
+  " record, begin, and do sometimes suffix a continuation
+  " statement. use simple matching to see if we have that
+  " siuation. note that this is a text match against the
+  " actual previoius line, not its highlighting. 
+  let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_num)))
+  if prev_line =~? '\v<(then|else|do|begin|record)$'
+    "echomsg printf("FpcGetIndent: trailing then/else/do/beign/record seen at: %d for: %d', prev_num, curr_num)
+    return prev_indent + &shiftwidth
   endif
 
   " if we get here, it's a hole in the bucket situation
-  DMSG printf('FpcGetIndent: lines unrecognized at current: %d %s previous: %d %s', curr_num, curr_word, prev_num, prev_word)
-  return curr_indent == prev_indent ? -1 : prev_indent
+  echoerr printf('FpcGetIndent: lines unrecognized at current: %d %s previous: %d %s', curr_num, curr_word, prev_num, prev_word)
+  return prev_indent
 
 endfunction
 
@@ -335,11 +347,13 @@ let s:fpc_indenting_words = [
       \ 'fpcLabel',
       \ 'fpcProcedure',
       \ 'fpcProgram',
+      \ 'fpcRecord',
       \ 'fpcRepeat',
       \ 'fpcThen',
       \ 'fpcType',
       \ 'fpcUnit',
       \ 'fpcUntil',
+      \ 'fpcUses',
       \ 'fpcVar',
       \ 'fpcWhile',
       \ 'fpcWith',
@@ -432,13 +446,21 @@ function g:FpcGetPriorPair(for_num, for_word)
   let search_from = curr_num
 
   if a:for_word ==# 'fpcEnd'
-    " txb: record is a possibility but not handled yet
-    let other_word = 'fpcBegin'
-    let pair_start = '\v\c<begin>'
+    " record is a weird one, it doesn't nest and it'd require
+    " bad nesting of the pascal source to hit record after
+    " processing a nested begin. hopefully this just works.
+    let pair_start = '\v\c<(begin|record)>'
     let pair_middle = ''
     let pair_end = '\v\c<end>'
+  elseif a:for_word ==# 'fpcThen'
+    let pair_start = '\v\c<if>'
+    let pair_middle = ''
+    let pair_end = '\v\c<then>'
+  elseif a:for_word ==# 'fpcElse'
+    let pair_start = '\v\c<if>'
+    let pair_middle = ''
+    let pair_end = '\v\c<else>'
   elseif a:for_word ==# 'fpcUntil'
-    let other_word = 'fpcRepeat'
     let pair_start = '\v\c<repeat>'
     let pair_middle = ''
     let pair_end = '\v\c<until>'
@@ -543,19 +565,16 @@ endfunction
 function! FpcTestMatch(seeking)
   let i = 1
   let j = 0
-  let keep_dlfag = g:DMSG_flag
-  let g:DMSG_flag = 1
-  DMSG printf('FpcTestMatch: lines matching %s ...', a:seeking)
+  echomsg printf('FpcTestMatch: lines matching %s ...', a:seeking)
   while i <= line('$')
     let s = getline(i)
     if s =~ a:seeking
-      DMSG printf('%d:%s', i, s)
+      echomsg printf('%d:%s', i, s)
       let j = j + 1
     endif
     let i = i + 1
   endwhile
-  DMSG printf('FpcTestMatch: %d lines checked, %d lines matched', (i - 1), k)
-  let g:DMSG_flag = keep_dlfag
+  echomsg printf('FpcTestMatch: %d lines checked, %d lines matched', (i - 1), k)
 endfunction
 
 
