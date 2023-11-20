@@ -28,226 +28,244 @@ set cpo&vim
 
 
 " ------------------------------------------------------------------
-" this probably belongs in ftplugin/fpc.vim, but i'm not dealing
-" with cross file scoping with <PLUG> or autoload yet. when i did
-" have this in ftplugin, BufReadPost could also be used, but that
-" doesn't work from indent.vim.
-"
-" TextChanged fires at the end of a filter pass (gg=G) which is
-" a shame for my use, but i don't see a way to safely not do the
-" cache reset.
-"
-" txb: still trying to decide if this should be <buffer> or file
-"      pattern. 
-" ------------------------------------------------------------------
-".augroup fpc_vim_indent
-".  autocmd!
-".  autocmd TextChanged,InsertLeave <buffer> call g:FpcResetAnalysis()
-"augroup END
-
 " beyond the b:did and b:undo standards for plugins, these are
 " buffer local variables that are global to indenting. hoping
 " to remove almost all of these.
-
+"
+" i developed a tendency to make everything buffer local scope
+" but i now see that as a mistake. yes, it makes some debugging
+" easier but it introduces extra state that can cause side
+" effects. variables should be narrowly scoped.
+"
+" any script scoped variable should be treated as a constant.
 " ------------------------------------------------------------------
-let b:indenting = 1
-let b:backtrack_boundary = 0
-let b:comment_start_line = 0
-let b:comment_end_line = 0
-let b:in_comment = 0
-" ------------------------------------------------------------------
-
-" txb: set to 1 to enable DMSG throughout
-"      or do selectively in functions around
-"      trouble spots. DMSGOn and DMSGOff work
-"      there too.
-let g:DMSG_flag = 0
-
-".function! g:FpcResetAnalysis()
-".  let b:indenting = 1
-".  let b:backtrack_boundary = 0
-".  let b:comment_start_line = 0
-".  let b:comment_end_line = 0
-".  let b:in_comment = 0
-".endfunction
+function g:FpcInitBufferVars()
+  let b:indenting = 1
+  let b:last_indent_request = -1
+  " txb: set to 1 to enable DMSG throughout
+  "      or do selectively in functions around
+  "      trouble spots. DMSGOn and DMSGOff work
+  "      there too.
+  let g:DMSG_flag = 1
+endfunction
 
 
 " ------------------------------------------------------------------
 " indent doesn't fire without an expression.
 "
 " while indentkeys aren't being used at present, both indentkeys and
-" = (filtering) will use indentexpr.
+" = (filtering) use indentexpr.
 "
 " note the passing of v:lnum instead of using the global directly in
-" FpcGetIndent(). this allows calling from command mode or from
-" other functions.
+" FpcGetIndent(). this allows testing from command mode. most 
+" functoins are set up to allow interactive testing via call or echo
+" and can accept marks as line numbers.
 " ------------------------------------------------------------------
+call g:FpcInitBufferVars()
 setlocal indentexpr=g:FpcGetIndent(v:lnum)
 
-function! g:FpcGetIndent(of_line)
 
+" ------------------------------------------------------------------
+" main indent function
+"
+" this code relies heavily on checking syntax highlighting in the
+" hope that 'reusing' the highlighter's pattern matches is faster
+" and more accurate that doing new pattern matches.
+"
+" the ternary expression return is an optimistic optimization in
+" the hope that it might save vim/nvim a few cycles.
+" ------------------------------------------------------------------
+function! g:FpcGetIndent(of_line)
   let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
 
-  " first line or invalid line always indent 0
+  " invalid lines always indent 0
   if curr_num < 1 || curr_num > line('$')
     return 0
   endif
 
+  " attempt to avoid broken indenting or bad nesting of
+  " indent off/on directives from messing up indent
+  if b:last_indent_request == -1 ||
+        \ b:last_indent_request >= curr_num
+    let b:indenting = 1
+  endif
+  let b:last_indent_request = curr_num
+
   let curr_line = getline(curr_num)
-
-  " format/indent directives {##indent:on|off} can turn off
-  " indent processing for a block of lines. defaults to on.
-  if curr_line =~ '\v\c^\s*((\{\#\#|\(\*\#\#))indent'
-    let b:indenting = -1
-    if curr_line =~ '\v\c<indent[: =-]off>'
-      let b:indenting = 0
-    endif
-    if curr_line =~ '\v\c<indnet[: =-]on>'
-      let b:indenting = 1
-    endif
-    if b:indenting == -1
-      echoerr printf('FpcGetIndent: bad ##indent directive ignored at line: %d %s', curr_num, matchstr(curr_line, '\v\c((\{\#\#)|(\(\*\#\#)).*'))
-      let b:indenting = 1
-    endif
-  endif
-
-  " preprocessor commands reet indent regardless of indent setting
-  if g:FpcIsPreprocessing(curr_num)
-    DMSG printf('FpcGetIndent: preprocessor directive at line: %d %s', curr_num, curr_line)
-    return indent(curr_num) == 0 ? -1 : 0
-  endif
-
-  " leave blank lines and lines containing a complete comment with
-  " no preceeding non-comment text unchanged. remember that comments
-  " may not be nested.
-  "if curr_line =~ '\v^\s*$'
-  "  return -1
-  "endif
-  "if curr_line =~ '\v^\s*(\{.*\}|\(\*.*\*\)|\/\/)'
-  "  return -1
-  "endif
-
-  if !b:indenting || curr_line =~ '\v^\s*$' || g:FpcIsComment(curr_num)
-    return -1
-  endif
-
-  " comment lines, blank lines, and anything when not indenting
-  " are all unchanged
-  if !b:indenting || g:FpcIsBlankOrLeadingComment(curr_num)
-    return -1
-  endif
-
-  " this line may be indentable
   let curr_indent = indent(curr_num)
 
-  " these lines all have hard left justification and are boundary
-  " lines for look behinds. the ternary expression return is a
-  " possibly unneeded optimization, but just maybe vim or neovim
-  " won't flag textchanged for these lines.
-  if g:FpcIsBoundaryLine(curr_num)
-    let b:backtrack_boundary = curr_num
+  " preprocessor commands ALWAYS reset their own indent.
+  " here is where to process indent directives. b:indenting
+  " is only modified by directive in FpcIndentOffOnFlagging
+  " but it defaults to 1 when the plugin is loaded and
+  " (hopefully) when a new full indent pass is started.
+  if g:FpcIsPreprocessing(curr_num, curr_line)
+    call g:FpcIndentOffOnFlagging(curr_num, curr_line)
     return curr_indent == 0 ? -1 : 0
   endif
 
-  " sanitize the line by removing strings and comments. i might
-  " be able to combine into one routine but at one point the
-  " split seemed necessary. this sanitizing does not alter the
-  " actual line in the buffer.
-  let curr_line = g:FpcStripStrings(curr_line)
-  let curr_line = g:FpcStripComments(curr_line)
-
-  " generally take prior indent unless that line indents us but
-  " a leading begin is a special case. also not that while the
-  " check here is for begin at start of line, the pattern sent
-  " for pair searching is for begin anywhere.
-  if curr_line =~ '\v\c^\s*begin>'
-    DMSG printf('FpcGetIndent: leading/only begin seeking correct prior line for indent from line: %d, %s', curr_num, curr_line)
-    let prev_num = g:FpcGetPriorPair(curr_num,
-          \ '\v\c<(program|procedure|function|var|type|const|label|if|then|else|while|do|with)>',
-          \ '\v\c<begin>')
-    let prev_line = getline(prev_num)
-    let prev_indent = indent(prev_num)
-    return curr_indent == prev_indent ? -1 : prev_indent
+  " a lines indent is unchanged if indenting is off, it is a
+  " comment, or it is blank
+  if !b:indenting ||
+        \ g:FpcIsComment(curr_num) ||
+        \ curr_line =~# '\v(^$|^\s*$)' 
+    return -1
   endif
 
-  " handle the closing of a compound statement. these can
-  " probably be folded together.
-  "   end -- begin/case/record
-  "   until -- repeat
-  if curr_line =~ '\v\c<end>'
-    "DMSGOn
-    DMSG printf('FpcGetIndent: end seeking matching begin-case-record from line: %d %s', curr_num, curr_line)
-    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<(begin|record|case)>', '\v\c<end>')
-    let prev_line = getline(prev_num)
-    let prev_indent = indent(prev_num)
-    DMSG printf('FpcGetIndent: using line %d for "end" at line %d', prev_num, curr_num)
-    "DMSGOff
-    return curr_indent == prev_indent ? -1 : prev_indent
+  " this line may be indentable.
+  "
+  " new statements are expected to start on a new line, so the
+  " first word on a line tells us how to indent it. for our
+  " purposes, 'word' is the name of the syntax highlight group
+  " from syntax/fpc.vim. 
+  let curr_word = g:FpcGetFirstWordHl(curr_num)
+
+  " these lines all have hard left justification and are boundary
+  " lines when looking backward for indent guidance.
+  if g:FpcIsBoundaryWordHl(curr_word)
+    return curr_indent == 0 ? -1 : 0
   endif
 
-  if curr_line =~ '\v\c<until>'
-    DMSG printf('FpcGetIndent: until seeking matching begin-case-with/repeat from line: %d %s', curr_num, curr_line)
-    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<repeat>', '\v\c<until>')
-    let prev_line = getline(prev_num)
-    let prev_indent = indent(prev_num)
-    return curr_indent == prev_indent ? -1 : prev_indent
-  endif
-
-  " if then else with then and else leading lines. else usually
-  " leads, then does not.
-
-  " then
-  if curr_line =~ '\v\c<then>' && curr_line !~ '\v\c.*<if>.*<then>'
-    DMSG printf('FpcGetIndent: then seeking matching if from line: %d %s', curr_num, curr_line)
-    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<if>', '\v\c<then>')
-    let prev_line = getline(prev_num)
-    let prev_indent = indent(prev_num)
-    return curr_indent == prev_indent ? -1 : prev_indent
-  endif
-
-  " else
-  if curr_line =~ '\v\c<else>' && curr_line !~ '\v\c.*<end>\s+<else>'
-    DMSG printf('FpcGetIndent: then seeking matching if from line: %d %s', curr_num, curr_line)
-    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<if>', '\v\c<else>')
-    let prev_line = getline(prev_num)
-    let prev_indent = indent(prev_num)
-    return curr_indent == prev_indent ? -1 : prev_indent
-  endif
-
-  " the do is a lot like the else and then. 
-  if curr_line =~ '\v\c<do>' && curr_line !~ '\v\c.*<(for|while|with)>.*<do>'
-    DMSG printf('FpcGetIndent: do seeking matching for|while|with from line: %d %s', curr_num, curr_line)
-    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<(for|while|with)>', '\v\c<do>')
-    let prev_line = getline(prev_num)
-    let prev_indent = indent(prev_num)
-    return curr_indent == prev_indent ? -1 : prev_indent
-  endif
-
-  " look back to the prior code line to get the indent for the
-  " current line. some of those code lines indent this line.
-  " including the various parts of some statements (then and
-  " else of if, for example) along with begin and end should
-  " properly handle the many arrangements of things such as
-  " if-then-begin-end-else ...
+  " indenting drives off a prior line. sometimes it's the
+  " immediately prior line, others it's a specific line 
+  " but we'll start with the immediate prior line.
   let prev_num = g:FpcGetPrior(curr_num)
-  let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_num)))
+  let prev_word = g:FpcGetFirstWordHl(prev_num)
   let prev_indent = indent(prev_num)
-  if prev_line =~ '\v\c<(begin|label|const|type|var|if|for|while|with|repeat|case|record|do|then|else|uses)>'
-    return curr_indent == prev_indent + &shiftwidth ? -1 : prev_indent + &shiftwidth
+
+  " an outdenting word is one that will cause itself and following
+  " lines to outdent. end should line up under begin, and until
+  " should line up under repeat.
+
+  " every end has its beginning
+  " txb: and record, but ignoring that for now.
+  if curr_word =~# 'fpcEnd'
+    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<begin>', '\v\c<end>')
+    let prev_word = g:FpcGetFirstWordHl(prev_num)
+    let prev_indent = indent(prev_num)
+    return curr_indent == prev_indent - &shiftwidth
+          \ ? -1
+          \ : prev_indent - &shiftwidth
   endif
+
+  " every until has its repeat
+  if curr_word =~# 'fpcUntil'
+    let prev_num = g:FpcGetPriorPair(curr_num, '\v\c<begin>', '\v\c<end>')
+    let prev_word = g:FpcGetFirstWordHl(prev_num)
+    let prev_indent = indent(prev_num)
+    return curr_indent == prev_indent - &shiftwidth
+          \ ? -1
+          \ : prev_indent - &shiftwidth
+  endif
+
+  " begin shows up all over the code, but basically lines up
+  " under the statement it provides a grouping for. if, for, etc.
+  if curr_word ==# 'fpcBegin'
+    while !g:FpcIsBoundaryLine(prev_num) && prev_word !~# '\vfpc(For|While|If|Then|Else|With|Do|End)'
+      let prev_num = g:FpcGetPrior(prev_num)
+      let prev_word = g:FpcGetFirstWordHl(prev_num)
+      let prev_indent = indent(prev_num)
+    endwhile
+    return curr_indent == prev_indent ? -1 : prev_indent
+  endif
+
+  " if the line does not begin with an indenting word, it is
+  " likely either a continuation line or the start of a statement
+  " which should be a function call or an assignment.
+  "
+  " take the indent of the prior code line if the prior line is
+  " also not an indenting word. Otherwise, things get more 
+  " interesting.
+  if !g:FpcIsIndentingWordHl(prev_word)
+    return curr_indent == prev_indent ? -1 : prev_indent
+  endif
+
+  " these aren't really indenting words at this point.
+  if prev_word =~# '\vfpc(End|Until)'
+    return curr_indent == prev_indent ? -1 : prev_indent
+  endif
+
+  " these words indent one level. while multiple could be on
+  " any one line, the indent is only one level.
+  if prev_word =~# '\vfpc(Begin|Label|Const|Type|Var|If|For|While|With|Repeat|Case|Then|Else|Uses|Record)'
+    return curr_indent == prev_indent + &shiftwidth
+          \ ? -1
+          \ : prev_indent + &shiftwidth
+  endif
+
+  " if we get here, it's a hole in the bucket situation
+  DMSG printf('FpcGetIndent: lines unrecognized at current: %d %s previous: %d %s', curr_num, curr_word, prev_num, prev_word)
   return curr_indent == prev_indent ? -1 : prev_indent
 
 endfunction
 
+
 " -------------------------------------------------------------------
-" find backtrack hard boundary line, does *not* reset
-" b:backtrack_boundary. this search currently doesn't handle
-" comments or indent supression.
+" is a line a preprocesosr directive? {$...} (*$...*) {##...} #
+" -------------------------------------------------------------------
+function! g:FpcIsPreprocessing(curr_num, curr_line)
+  return a:curr_line =~# '\v^\s*(((\{|\(\*)(\$|\#\#))|\#)'
+endfunction
+
+
+" -------------------------------------------------------------------
+" format/indent directives {##indent:on|off} can turn off
+" indent processing for a block of lines. defaults to on.
+" the indenting flag b:indenting is a global.
+" -------------------------------------------------------------------
+function! FpcIndentOffOnFlagging(curr_num, curr_line)
+  if a:curr_line =~? '\v^\s*((\{\#\#|\(\*\#\#))indent'
+    let b:indenting = -1
+    if a:curr_line =~? '\v<indent[: =-]off>'
+      let b:indenting = 0
+    endif
+    if a:curr_line =~? '\v<indnet[: =-]on>'
+      let b:indenting = 1
+    endif
+    if b:indenting == -1
+      echoerr printf('FpcGetIndent: bad ##indent directive at line: %d %s', a:curr_num, a:curr_line)
+      let b:indenting = 1
+      echoerr printf('FpcGetIndent: forcing indent on')
+    endif
+  endif
+endfunction
+
+
+" -------------------------------------------------------------------
+" use the syntax highlighting name of the first non blank character
+" on the line to identify the word. highlighting of words that can
+" influence indent and structure is finely grained in the syntax
+" file.
+" -------------------------------------------------------------------
+function! g:FpcGetFirstWordHl(of_line)
+  let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
+  if curr_num == 0
+    return 'ERROR-UNKNOWN'
+  endif
+  let result = 0
+  let save_cursor = getcurpos()
+  call cursor(curr_num, 1)
+  " if we don't find a char on the same line, it's an error
+  let at_line = search('\v\S', 'cW', line('$'), 1000)
+  if at_line != curr_num
+    let result = 'ERROR-UNKNOWN'
+  else
+    let result = synIDattr(synID(line('.'),col('.'),0),'name')
+  endif
+  call cursor(save_cursor[1], save_cursor[0])
+  return result
+endfunction
+
+
+" -------------------------------------------------------------------
+" find a hard boundary line to end backward searches. these lines
+" mark the start of code units such as procedures or sections in
+" a unit.
 " -------------------------------------------------------------------
 
-let s:match_boundary_line = '\v\c^\s*((procedure|function|label|var|program|unit|uses|const|type|interface|implementation|initialization|finalization)>|end\.)'
+let s:match_boundary_line = '\v\c^\s*<(procedure|function|label|var|program|unit|uses|const|type|interface|implementation|initialization|finalization)>'
 
-function! g:FpcGetBacktrackBoundary(of_line)
+function! g:FpcFindSearchBoundary(of_line)
   let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
   if curr_num == 0
     return 0
@@ -256,13 +274,15 @@ function! g:FpcGetBacktrackBoundary(of_line)
   call cursor(curr_num, 1)
   let prior_num = search(s:match_boundary_line, 'bW', 1, 0, s:skip_contained)
   if prior_num < 1
-    echomsg 'no boundary found before' .. curr_num
+    DMSG printf('no boundary found before %d', curr_num)
     let prior_num = 0
   else
-    echomsg 'boundary found at ' .. line('.') .. ',' .. col('.')
-    echomsg synIDattr(synID(line('.'),col('.'),0), 'name')
-    call cursor(save_cursor[1], save_cursor[2])
+    DMSG printf('boundary for %d found at %d,%d %s',
+          \ curr_num,
+          \ line('.'), col('.'),
+          \ synIDattr(synID(line('.'),col('.'),0), 'name'))
   endif
+  call cursor(save_cursor[1], save_cursor[2])
   return prior_num
 endfunction
 
@@ -285,16 +305,71 @@ function! g:FpcTextOrNumberFrom(arg)
         \ ? line(a:arg)
         \ : a:arg
 endfunction
- 
+
+
+" -------------------------------------------------------------------
+" all indenting word highlights, kept in alphabetical order please!
+" -------------------------------------------------------------------
+let s:fpc_indenting_words = [
+      \ 'fpcBegin',
+      \ 'fpcCase',
+      \ 'fpcConst',
+      \ 'fpcDo',
+      \ 'fpcElse',
+      \ 'fpcEnd',
+      \ 'fpcFinalization',
+      \ 'fpcFor',
+      \ 'fpcFunction',
+      \ 'fpcGoto',
+      \ 'fpcIf',
+      \ 'fpcImplementation',
+      \ 'fpcInitialization',
+      \ 'fpcInterface',
+      \ 'fpcLabel',
+      \ 'fpcProcedure',
+      \ 'fpcProgram',
+      \ 'fpcRepeat',
+      \ 'fpcThen',
+      \ 'fpcType',
+      \ 'fpcUnit',
+      \ 'fpcUntil',
+      \ 'fpcVar',
+      \ 'fpcWhile',
+      \ 'fpcWith',
+      \ ]
+
+" -------------------------------------------------------------------
+" check current highlight to see if it is an indenting word
+" -------------------------------------------------------------------
+function! g:FpcIsIndentingWordHl(word)
+  for item in s:fpc_indenting_words
+    if item ==# a:word
+      return 1
+    endif
+    if item ># a:word
+      return 0
+    endif
+  endfor
+  return 0
+endfunction
+
+" -------------------------------------------------------------------
+" a boundary word is one that marks a significant structural point
+" in pascal source code.
+" -------------------------------------------------------------------
+function! g:FpcIsBoundaryWordHl(word)
+  return a:word =~# '\vfpc(Program|Unit|Procedure|Function|Const|Type|Var|Label|Uses|Interface|Implementation|Initialization|Finalization)'
+endfunction
+
 
 " -------------------------------------------------------------------
 " a boundary line is one that ends a backward search. 
 " -------------------------------------------------------------------
 function! g:FpcIsBoundaryLine(of_line)
   let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
-  return curr_num == 0
-        \ ? 1
-        \ : getline(curr_num) =~ s:match_boundary_line
+  return curr_num < 1 ||
+        \ curr_num > line('.') ||
+        \ g:FpcIsBoundaryWordHl(g:FpcGetFirstWordHl(curr_num))
 endfunction
 
 
@@ -304,19 +379,8 @@ endfunction
 function! g:FpcIsBlankOrLeadingComment(of_line)
   let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
   let curr_line = getline(curr_num)
-  return curr_line =~ '\v\c^\s*$' ||
-        \ curr_line =~ '\v\c^\s*((\{.*\})|(\(\*.*\*\))|\/\/)\.*$'
-endfunction
-
-
-" -------------------------------------------------------------------
-" is a line a preprocesosr directive? {$...} (*$...*) {##...} #
-" -------------------------------------------------------------------
-function! g:FpcIsPreprocessing(of_line)
-  let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
-  return curr_num == 0
-        \ ? 0
-        \ : getline(curr_num) =~ '\v\c^\s*(((\{|\(\*)(\$|\#\#))|\#)'
+  return curr_line =~# '\v^\s*$' ||
+        \ curr_line =~# '\v^\s*((\{.*\})|(\(\*.*\*\))|\/\/)\.*$'
 endfunction
 
 
@@ -326,64 +390,50 @@ endfunction
 function! g:FpcGetPrior(of_line)
   let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
 
-  if curr_num == 0
+  if curr_num <= 1
     return 0
   endif
 
-  DMSG printf('FpcGetPrior: seeking prior for line at: %d, boundary at: %d, comment range: %d - %d', curr_num, b:backtrack_boundary, b:comment_start_line, b:comment_end_line)
-
-  let stop_search = g:FpcGetBacktrackBoundary(curr_num)
-  while curr_num > stop_search
-    let curr_num = prevnonblank(curr_num - 1)
-    DMSG printf('FpcGetPrior: checking %d', curr_num)
-    if b:comment_start_line <= curr_num && curr_num <= b:comment_end_line
-      DMSG printf('FpcGetPrior: line %d is in comment range %d - %d', curr_num, b:comment_start_line, b:comment_end_line)
-      continue
-    endif
-    if g:FpcIsBlankOrLeadingComment(curr_num)
-      DMSG printf('FpcGetPrior: line %d blank or leading comment', curr_num)
-      continue
-    endif
-    break
+  let prev_num = prevnonblank(curr_num - 1) 
+  let prev_word = g:FpcGetFirstWordHl(prev_num)
+  while prev_num != 0 && prev_word =~# '\vfpc(Comment|String|Operator|Integer|Real|Delimiter)'
+    let prev_num = prevnonblank(prev_num - 1) 
+    let prev_word = g:FpcGetFirstWordHl(prev_num)
   endwhile
 
-  DMSG printf('FpcGetPrior: found prior line: %d for line at: %d', curr_num, a:of_line)
-  return curr_num
+  return prev_num
 endfunction
 
 
 
 " -------------------------------------------------------------------
 " match pairs
-"
-" switching from searchpair() to searchpairpos() so i can avoid
-" false positives in comments.
 " -------------------------------------------------------------------
 let s:frag_hl_name = 'synIDattr(synID(line(''.''),col(''.''),0),''name'')'
 let s:frag_contained = '''\v\cfpc(comment|string)'''
 let s:skip_contained = s:frag_hl_name .. '=~#' .. s:frag_contained
 let s:accept_contained = '!(' .. s:skip_contained .. ')'
-let s:skip_comment = 'synIDattr(synID(line(''.''),col(''.''),0),''name'') =~# ''fpcComment'''
-let s:accept_comment = '!(' .. s:skip_comment .. ')'
-let s:skip_boundary = 'synIDattr(synID(line(''.''),col(''.''),0),''name'') =~? ''fpc(boundary|definition)'''
 
 function g:FpcIsComment(of_line)
-  return g:FpcIsHlChar(a:of_line, s:accept_comment)
+  " trust FpcIsHlChar to deal with a:of_line
+  return g:FpcIsHlChar(a:of_line, '\vfpcComment')
 endfunction
 
-function g:FpcIsHlChar(of_line, acceptor)
+function g:FpcIsHlChar(of_line, desired_hl)
   let curr_num = type(a:of_line) == v:t_string ? line(a:of_line) : a:of_line
   if curr_num < 1 || curr_num > line('$')
+    "DMSG printf('FpcIsHlChar: invalid line in call at: %d %s', curr_num, a:desired_hl)
     return 1
   endif
   let result = 0
   let save_cursor = getcurpos()
   call cursor(curr_num, 1)
-" search({pattern} [, {flags} [, {stopline} [, {timeout} [, {skip}]]]])
-  let result = search('\v\c.', 'cW', line('$'), 1000, a:acceptor)
-  if line('.') == curr_num
-    let result = 1
-  endif
+  " search({pattern} [, {flags} [, {stopline} [, {timeout} [, {skip}]]]])
+  " txb: ignoring possibility of error on search right now
+  call search('\v.', 'cW', line('$'), 1000)
+  let result = synIDattr(synID(line('.'),col('.'),0),'name') =~? a:desired_hl
+  "DMSG printf('FpcIsHlChar: result: %d, dot: %d,%d, cursor: %s', result, line('.'), col('.'), getcurpos())
+  "DMSG printf('FpcIsHlChar: want: %s got : %s', a:desired_hl, synIDattr(synID(line('.'),col('.'),0),'name'))
   call cursor(save_cursor[1], save_cursor[0])
   return result
 endfunction
@@ -397,17 +447,11 @@ function g:FpcGetPriorPair(of_line, match_open, match_close)
   let search_pair_start = a:match_open
   let search_pair_middle = ''
   let search_pair_end = a:match_close
-  DMSG printf('FpcGetPriorPair: seeking prior %s for %s at: %d, boundary at: %d',
-        \ search_pair_start, search_pair_end,
-        \ curr_num, b:backtrack_boundary)
-  let stop_search = b:backtrack_boundary == 0
-        \ ? g:FpcGetBacktrackBoundary(curr_num - 1)
-        \ : b:backtrack_boundary
+  let stop_search = g:FpcFindSearchBoundary(curr_num - 1)
   let save_cursor = getcurpos()
   call cursor(curr_num, 1)
   let nesting = 0
   let search_from = curr_num
-  DMSG printf('FpcGetPriorPair: boundary: %d  stop: %d', b:backtrack_boundary, stop_search)
   " prime the pump
   let where_matched = searchpair(
         \ search_pair_start, search_pair_middle, search_pair_end,
@@ -439,7 +483,7 @@ function g:FpcGetPriorPair(of_line, match_open, match_close)
   call cursor(save_cursor[1], save_cursor[2])
 
   if where_matched <= stop_search || nesting
-    DMSG printf('FpcGetPriorPair: match for '%s' at: %d not found by: %d, nesting: %d',
+    DMSG printf('FpcGetPriorPair: match for %s at: %d not found by: %d, nesting: %d',
           \ search_pair_end, curr_num, stop_search, nesting)
     let where_matched = 0
   endif
@@ -505,7 +549,7 @@ function! g:FpcIsVarOrType(of_line)
   endif
   return 0
 endfunction
- 
+
 function! FpcTestMatch(seeking)
   let i = 1
   let j = 0
