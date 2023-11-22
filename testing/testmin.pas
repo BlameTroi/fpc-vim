@@ -1,4 +1,12 @@
 program a;
+
+procedure dproc(a: integer; b: intger;
+                c: real;    d: string;
+                function eof: boolean);
+begin
+  writeln(eof);
+end;
+
 var
   i, j: integer;
 begin

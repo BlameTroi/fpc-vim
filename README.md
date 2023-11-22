@@ -24,7 +24,7 @@ The following are the planned features of this plugin:
 
 ## Bugs
 
-- [ ] Destroys formatting of lucid or literate function/procedure headers. Use the indent off and on directives to circumvent this.
+- [ ] Can destroy formatting of lucid or literate function/procedure headers if a function parameter is the first parameter on the second or later line of the definition. Use the indent off and on directives to circumvent this.
 - [ ] Indenting after single statement's under various statements is not restored correctly. `for ... do <nl> statement1; <nl> statement2; ` does not align `statement2` even with `for`. Gratuitous use of `begin ... end;` circumvents this.
 - [x] Indenting with a reserved word such as `for` in a trailing comment on a line containing other code can cause subsequent lines to indent as if they were under a `for`.
 - [x] Does not indent names under `uses` directive.
