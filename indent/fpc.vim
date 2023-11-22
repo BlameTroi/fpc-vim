@@ -84,8 +84,8 @@ setlocal indentexpr=g:FpcGetIndent(v:lnum)
 " the ternary expression return is an optimistic optimization in
 " the hope that it might save vim/nvim a few cycles.
 " ------------------------------------------------------------------
-function! g:FpcGetIndent(for_num)
-  let curr_num = type(a:for_num) == v:t_string ? line(a:for_num) : a:for_num
+function! g:FpcGetIndent(for_lnum)
+  let curr_num = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
 
   " invalid lines always indent 0
   if curr_num < 1 || curr_num > line('$')
@@ -170,17 +170,27 @@ function! g:FpcGetIndent(for_num)
     return prev_indent
   endif
 
+  " while taking the first word on a line works well, it doesn't
+  " for record/object/class. since these all need to trigger an
+  " indent, a bit of ugliness here goes looking for these as
+  " the last word on the prior line. class and object can inherit
+  " and name the ancestor as in object(parent), so we'll need
+  " to handle that at some point.
+
+  let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_num)))
+  if !g:FpcIsIndentingWord(prev_word)
+    if prev_line =~? '\v<record$'
+      let prev_word = 'fpcRecord'
+    elseif prev_line =~? '\v<object$'
+      let prev_word = 'fpcObject'
+    elseif prev_line =~? '\v<class$'
+      let prev_word = 'fpcClass'
+    endif
+  endif
+
   " if the line does not begin with an indenting word, it is
   " likely either a continuation line or the start of a statement
   " which should be a function call or an assignment.
-  "
-  " unfortunately, record definitions need to trigger an indent
-  " and they pretty much never the first word on a line. some
-  " uglieness is required.
-
-  if !g:FpcIsIndentingWord(prev_word) && g:FpcStripComments(g:FpcStripStrings(getline(prev_num))) =~? '\v<record$'
-    let prev_word = 'fpcRecord'
-  endif
 
   " take the indent of the prior code line if the prior line is
   " also not an indenting word. Otherwise, things get more 
@@ -200,7 +210,7 @@ function! g:FpcGetIndent(for_num)
   " statement they are a part of, while-do, if-then, and so
   " on. however, they may appear as the first word of a line
   " so we handle them here as well.
-  if prev_word =~# '\vfpc(Begin|Label|Const|Type|Var|If|For|While|With|Repeat|Case|Then|Else|Uses|Record|Do)'
+  if prev_word =~# '\vfpc(Begin|Label|Const|Type|Var|If|For|While|With|Repeat|Case|Then|Else|Uses|Record|Do|Object|Class)'
     return prev_indent + &shiftwidth
   endif
 
@@ -209,7 +219,7 @@ function! g:FpcGetIndent(for_num)
   " siuation. note that this is a text match against the
   " actual previoius line, not its highlighting. 
   let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_num)))
-  if prev_line =~? '\v<(then|else|do|begin|record)$'
+  if prev_line =~? '\v<(then|else|do|begin|record|object|class)$'
     "echomsg printf("FpcGetIndent: trailing then/else/do/beign/record seen at: %d for: %d', prev_num, curr_num)
     return prev_indent + &shiftwidth
   endif
@@ -220,6 +230,66 @@ function! g:FpcGetIndent(for_num)
 
 endfunction
 
+
+" search({pattern} [, {flags} [, {stopline} [, {timeout} [, {skip}]]]])
+" return list [ highlight of first word, start row, col, end row, col]
+"
+" finding statement start ok on if and deep in a proc, but there
+" are issues at front of proc
+"
+" also, col numbers are looking weird, need to trace
+function! g:FpcStatementStart(for_lnum)
+  let curr_num = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
+  let save_cursor = getcurpos()
+  call cursor(curr_num, 1)
+  let result_first_word = 'UNKNOWN'
+  let result_start_line = 0
+  let result_start_col = 0
+  let result_end_line = 0
+  let result_end_col = 0
+  let semi_at = search('\v\;', 'bW', 0, 1000, s:skip_contained)
+  if semi_at == 0
+    call cursor(save_cursor[1], save_cursor[2])
+    return [result_first_word, 0, 0, 0, 0]
+  endif
+  let result_end_line = line('.')
+  let result_end_col = col('.')
+  let semi_at = search('\v\;', 'bW', 0, 1000, s:skip_contained)
+  if semi_at == 0
+    call cursor(save_cursor[1], save_cursor[2])
+    return [result_first_word, 0, 0, result_end_line, result_end_col]
+  endif
+  let semi_at = search('\v\S', 'zW', curr_num, s:skip_contained)
+  if semi_at == 0
+    call cursor(save_cursor[1], save_cursor[2])
+    return [result_first_word, 0, 0, result_end_line, result_end_col]
+  endif
+  let result_start_line = line('.')
+  let result_start_col = col('.')
+  call cursor(save_cursor[1], save_cursor[2])
+  let result_first_word = g:FpcGetWordAt(result_start_line, result_start_col)
+  return [result_first_word, result_start_line, result_start_col, result_end_line, result_end_col]
+endfunction
+
+
+function! g:FpcTestSearch(for_lnum, for_cnum, for_pat, for_flag)
+  let curr_num = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
+  let curr_col = type(a:for_cnum) == v:t_string ? col(a:for_cnum) : a:for_cnum
+  let save_cursor = getcurpos()
+  call cursor(curr_num, curr_col)
+  let start_cursor = getcurpos()
+  let stop_line = a:for_flag =~# 'b' ? 1 : line('$')
+  let result = search(a:for_pat, a:for_flag, stop_line, 1000, s:skip_contained)
+  echomsg printf('FpcTestSearch: search %s %s %d,%d %d %d,%d %s',
+        \ a:for_pat, a:for_flag, start_cursor[1], start_cursor[2],
+        \ result, line('.'), col('.'),
+        \ g:FpcGetWordAt(line('.'), col('.')))
+  call cursor(save_cursor[1], save_cursor[2])
+endfunction
+
+function! g:FpcStatementEnd(for_lnum)
+  return -1
+endfunction
 
 " -------------------------------------------------------------------
 " is a line a preprocesosr directive? {$...} (*$...*) {##...} #
@@ -234,7 +304,7 @@ endfunction
 " indent processing for a block of lines. defaults to on.
 " the indenting flag b:indenting is a global.
 " -------------------------------------------------------------------
-function! FpcIndentOffOnFlagging(for_num, for_line)
+function! FpcIndentOffOnFlagging(for_lnum, for_line)
   if a:for_line =~? '\v^\s*((\{\#\#|\(\*\#\#))indent'
     let b:indenting = -1
     if a:for_line =~? '\v<indent[: =-]off>'
@@ -244,7 +314,7 @@ function! FpcIndentOffOnFlagging(for_num, for_line)
       let b:indenting = 1
     endif
     if b:indenting == -1
-      echoerr printf('FpcGetIndent: bad ##indent directive at line: %d %s, forcing indent on!', a:for_num, a:for_line)
+      echoerr printf('FpcGetIndent: bad ##indent directive at line: %d %s, forcing indent on!', a:for_lnum, a:for_line)
       let b:indenting = 1
     endif
   endif
@@ -261,8 +331,8 @@ endfunction
 " fpcIf, then would be fpcThen, and so on. See syntax/fpc.vim for
 " the complete list.
 " -------------------------------------------------------------------
-function! g:FpcGetFirstWord(for_num)
-  let curr_num = type(a:for_num) == v:t_string ? line(a:for_num) : a:for_num
+function! g:FpcGetFirstWord(for_lnum)
+  let curr_num = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   if curr_num == 0
     return 'ERROR-UNKNOWN'
   endif
@@ -280,8 +350,8 @@ function! g:FpcGetFirstWord(for_num)
   return result
 endfunction
 
-function! g:FpcGetWordAt(for_num, for_col)
-  return  synIDattr(synID(a:for_num, a:for_col, 0), 'name')
+function! g:FpcGetWordAt(for_lnum, for_col)
+  return  synIDattr(synID(a:for_lnum, a:for_col, 0), 'name')
 endfunction
   
 
@@ -289,12 +359,15 @@ endfunction
 " find a hard boundary line to end backward searches. these lines
 " mark the start of code units such as procedures or sections in
 " a unit. returns 0 on error or not found.
+"
+" some class directives may need to be added here. public, private,
+" static?
 " -------------------------------------------------------------------
 
 let s:match_boundary_line = '\v\c^\s*<(procedure|function|label|var|program|unit|uses|const|type|interface|implementation|initialization|finalization)>'
 
-function! g:FpcFindSearchBoundary(for_num)
-  let curr_num = type(a:for_num) == v:t_string ? line(a:for_num) : a:for_num
+function! g:FpcFindSearchBoundary(for_lnum)
+  let curr_num = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   if curr_num == 0
     return 0
   endif
@@ -332,6 +405,7 @@ endfunction
 let s:fpc_indenting_words = [
       \ 'fpcBegin',
       \ 'fpcCase',
+      \ 'fpcClass',
       \ 'fpcConst',
       \ 'fpcDo',
       \ 'fpcElse',
@@ -345,8 +419,11 @@ let s:fpc_indenting_words = [
       \ 'fpcInitialization',
       \ 'fpcInterface',
       \ 'fpcLabel',
+      \ 'fpcObject',
+      \ 'fpcPrivate',
       \ 'fpcProcedure',
       \ 'fpcProgram',
+      \ 'fpcPublic',
       \ 'fpcRecord',
       \ 'fpcRepeat',
       \ 'fpcThen',
@@ -388,8 +465,8 @@ endfunction
 " -------------------------------------------------------------------
 " a boundary line is one that ends a backward search. 
 " -------------------------------------------------------------------
-function! g:FpcIsBoundaryLine(for_num)
-  let curr_num = type(a:for_num) == v:t_string ? line(a:for_num) : a:for_num
+function! g:FpcIsBoundaryLine(for_lnum)
+  let curr_num = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   return curr_num < 1 ||
         \ curr_num > line('.') ||
         \ g:FpcIsBoundaryWord(g:FpcGetFirstWord(curr_num))
@@ -399,8 +476,8 @@ endfunction
 " -------------------------------------------------------------------
 " find prior code line 
 " -------------------------------------------------------------------
-function! g:FpcGetPrior(for_num)
-  let curr_num = type(a:for_num) == v:t_string ? line(a:for_num) : a:for_num
+function! g:FpcGetPrior(for_lnum)
+  let curr_num = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
 
   if curr_num <= 1
     return 0
@@ -423,33 +500,35 @@ endfunction
 " -------------------------------------------------------------------
 let s:frag_hl_name = 'synIDattr(synID(line(''.''),col(''.''),0),''name'')'
 let s:frag_contained = '''\v\cfpc(comment|string)'''
-let s:skip_contained = s:frag_hl_name .. '=~#' .. s:frag_contained
+let s:skip_contained = s:frag_hl_name .. '=~' .. s:frag_contained
 let s:accept_contained = '!(' .. s:skip_contained .. ')'
 
 
 " ------------------------------------------------------------------
 " check for line (first non blank) being a comment.
 " ------------------------------------------------------------------
-function g:FpcIsComment(for_num)
-  return g:FpcGetFirstWord(a:for_num) ==# 'fpcComment'
+function g:FpcIsComment(for_lnum)
+  return g:FpcGetFirstWord(a:for_lnum) ==# 'fpcComment'
 endfunction
 
 
 " ------------------------------------------------------------------
 " 
 " ------------------------------------------------------------------
-function g:FpcGetPriorPair(for_num, for_word)
-  let curr_num = type(a:for_num) == v:t_string ? line(a:for_num) : a:for_num
+function g:FpcGetPriorPair(for_lnum, for_word)
+  let curr_num = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   if curr_num == 0
     return 0
   endif
   let search_from = curr_num
 
   if a:for_word ==# 'fpcEnd'
-    " record is a weird one, it doesn't nest and it'd require
-    " bad nesting of the pascal source to hit record after
-    " processing a nested begin. hopefully this just works.
-    let pair_start = '\v\c<(begin|record)>'
+    " record/object/class is a weird case, it doesn't nest
+    " and it'd require bad nesting of the pascal source to
+    " hit one after processing a nested begin. treating any
+    " of record/object/class as begin at this level just
+    " works, so rolling with it.
+    let pair_start = '\v\c<(begin|record|object|class)>'
     let pair_middle = ''
     let pair_end = '\v\c<end>'
   elseif a:for_word ==# 'fpcThen'
@@ -466,7 +545,7 @@ function g:FpcGetPriorPair(for_num, for_word)
     let pair_end = '\v\c<until>'
   else
     echoerr printf('FpcGetPriorPrair: unknown pairing word %s', a:for_word)
-    return a:for_num - 1
+    return a:for_lnum - 1
   endif
   let stop_search = g:FpcFindSearchBoundary(curr_num - 1)
   let save_cursor = getcurpos()
@@ -547,8 +626,8 @@ vnoremap <localleader>wi x:call g:FpcWrapIndentOffOn()<enter>""P
 " ------------------------------------------------------------------
 " test helpers
 " ------------------------------------------------------------------
-function! g:FpcIsVarOrType(for_num)
-  let curr_num = type(a:for_num) == v:t_string ? line(a:for_num) : a:for_num
+function! g:FpcIsVarOrType(for_lnum)
+  let curr_num = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   if curr_num == 0
     return 0
   endif

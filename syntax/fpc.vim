@@ -89,6 +89,7 @@ syntax match fpcIdentifier "\<[a-zA-Z_][a-zA-Z0-9_]*\>"
 " names to help with indenting and other functins of the plugin.
 syntax keyword fpcBegin           begin
 syntax keyword fpcCase            case
+syntax keyword fpcClass           class
 syntax keyword fpcConst           const
 syntax keyword fpcDo              do
 syntax keyword fpcElse            else
@@ -102,8 +103,11 @@ syntax keyword fpcImplementation  implementation
 syntax keyword fpcInitialization  initialization
 syntax keyword fpcInterface       interface
 syntax keyword fpcLabel           label
+syntax keyword fpcObject          object
+syntax keyword fpcPrivate         private
 syntax keyword fpcProcedure       procedure
 syntax keyword fpcProgram         program
+syntax keyword fpcPublic          public
 syntax keyword fpcRepeat          repeat
 syntax keyword fpcThen            then
 syntax keyword fpcType            type
@@ -176,6 +180,7 @@ highlight default link fpcDelimiters Delimiter
 " search skips.
 highlight default link fpcBegin           keyword
 highlight default link fpcCase            keyword
+highlight default link fpcClass           keyword
 highlight default link fpcConst           keyword
 highlight default link fpcDo              keyword
 highlight default link fpcElse            keyword
@@ -189,8 +194,11 @@ highlight default link fpcImplementation  keyword
 highlight default link fpcInitialization  keyword
 highlight default link fpcInterface       keyword
 highlight default link fpcLabel           keyword
+highlight default link fpcObject          keyword
+highlight default link fpcPrivate         keyword
 highlight default link fpcProcedure       keyword
 highlight default link fpcProgram         keyword
+highlight default link fpcPublic          keyword
 highlight default link fpcRepeat          keyword
 highlight default link fpcThen            keyword
 highlight default link fpcType            keyword
