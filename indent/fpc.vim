@@ -140,14 +140,15 @@ function! g:FpcGetIndent(for_lnum)
 
   " indenting drives off a prior line. sometimes it's the line
   " immediately prior, others it's a specific line.
-  let prev_num = g:FpcGetPrior(curr_lnum)
-  let [prev_word, prev_indent] = [g:FpcGetFirstWord(prev_num), indent(prev_num)]
+  let prev_lnum = g:FpcGetPrior(curr_lnum)
+  let [prev_word, prev_indent] = [g:FpcGetFirstWord(prev_lnum), indent(prev_lnum)]
 
+  echomsg printf('dbg curr %d prev %d %s %d %s', curr_lnum, prev_lnum, prev_word, prev_indent, getline(prev_lnum))
   " do not rearrange function/procedure definitions that may be
   " pretty-printed for documentation formatting. 
   if prev_word =~# '\vfpc(Procedure|Function)'
         \ && !g:FpcIndentProcedureDefinitions 
-        \ && curr_lnum <= g:FpcLastLineOfProcedureDef(prev_num)
+        \ && curr_lnum <= g:FpcLastLineOfProcedureDef(prev_lnum)[0]
     return -1
   endif
 
@@ -158,41 +159,35 @@ function! g:FpcGetIndent(for_lnum)
   " every end has its beginning
   "  or record ...
   if curr_word =~# '\vfpc(End|Then|Else|Until)'
-    let prev_num = g:FpcGetPriorPair(curr_lnum, curr_word)
-    let prev_word = g:FpcGetFirstWord(prev_num)
-    let prev_indent = indent(prev_num)
-    "echomsg printf('FpcGetIndent: %s at: %d found prior: %s at: %d indent: %d', curr_word, curr_lnum, prev_word, prev_num, prev_indent)
+    let prev_lnum = g:FpcGetPriorPair(curr_lnum, curr_word)
+    let prev_indent =indent(prev_lnum)
     return prev_indent
   endif
-
 
   " begin shows up all over the code, but basically lines up
   " under the statement it provides a grouping for. if, for, etc.
   " fpcDo is deliberately excluded. stmt<nl>do<nl>begin<nl>...
   " is poor style.
   if curr_word ==# 'fpcBegin' 
-    while prev_word !~# '\vfpc(For|While|If|Then|Else|With|End)' && !g:FpcIsBoundaryLine(prev_num)
-      let prev_num = g:FpcGetPrior(prev_num)
-      let prev_word = g:FpcGetFirstWord(prev_num)
-      let prev_indent = indent(prev_num)
+    while prev_word !~# '\vfpc(For|While|If|Then|Else|With|End)' && !g:FpcIsBoundaryLine(prev_lnum)
+      let prev_lnum = g:FpcGetPrior(prev_lnum)
+      let [prev_word, prev_indent] = [g:FpcGetFirstWord(prev_lnum), indent(prev_lnum)]
     endwhile
     return prev_indent
   endif
 
   " while taking the first word on a line works well, it doesn't
   " for record/object/class. since these all need to trigger an
-  " indent, a bit of ugliness here goes looking for these as
-  " the last word on the prior line. class and object can inherit
-  " and name the ancestor as in object(parent), so we'll need
-  " to handle that at some point.
-
-  let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_num)))
+  " indent, a bit of ugliness here to check for one of those being
+  " the last word on the prior line. if it is, pretend it was the
+  " first word.
+  let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_lnum)))
   if !g:FpcIsIndentingWord(prev_word)
     if prev_line =~? '\v<record$'
       let prev_word = 'fpcRecord'
-    elseif prev_line =~? '\v<object$'
+    elseif prev_line =~? '\v<object$' || prev_line =~ '\v<object\s*\(.*\)$'
       let prev_word = 'fpcObject'
-    elseif prev_line =~? '\v<class$'
+    elseif prev_line =~? '\v<class$' || prev_line =~ '\v<class\s*\(.*\)$'
       let prev_word = 'fpcClass'
     endif
   endif
@@ -223,50 +218,50 @@ function! g:FpcGetIndent(for_lnum)
     return prev_indent + &shiftwidth
   endif
 
-  " record, begin, and do sometimes suffix a continuation
-  " statement. use simple matching to see if we have that
-  " siuation. note that this is a text match against the
-  " actual previoius line, not its highlighting. 
-  let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_num)))
-  if prev_line =~? '\v<(then|else|do|begin|record|object|class)$'
-    "echomsg printf("FpcGetIndent: trailing then/else/do/beign/record seen at: %d for: %d', prev_num, curr_lnum)
-    return prev_indent + &shiftwidth
-  endif
+  echomsg printf('FpcGetIndent: confusion at %d %s', curr_lnum, curr_line)
+"  " record, begin, and do sometimes suffix a continuation
+"  " statement. use simple matching to see if we have that
+"  " siuation. note that this is a text match against the
+"  " actual previoius line, not its highlighting. 
+"  let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_lnum)))
+"  if prev_line =~? '\v<(then|else|do|begin|record|object|class)$'
+"    return prev_indent + &shiftwidth
+"  endif
 
   " if we get here, it's a hole in the bucket situation
-  echoerr printf('FpcGetIndent: lines unrecognized at current: %d %s previous: %d %s', curr_lnum, curr_word, prev_num, prev_word)
+  echoerr printf('FpcGetIndent: lines unrecognized at current: %d %s previous: %d %s', curr_lnum, curr_word, prev_lnum, prev_word)
   return prev_indent
 
 endfunction
 
 
-" returns end line and column of the end of a procedure or
-" function definition. can specify a column to start in but
-" that defaults to 1. cursor preserved. returns 0 on error.
+" -------------------------------------------------------------------
+" returns end line and column of the end of a procedure or function
+" definition. can specify a column to start in but that defaults to
+" start of the line. the cursor preserved. returns [0,0] on error.
 "
-" a function is a procedure that returns a value. neither
-" requires parameters in their definition. either can have
+" in pascal a function is a procedure that returns a value. neither
+" requires parameters in their definition but either can have
 " procedural paraemters.
 "
 " procedure flush;
 " procedure recycle(q: string);
 " function x(var i: integer; function y(z:real):real;
 "           j,k: integer): boolean;
-"
+" 
+" in all cases, the end of a definitin is found when the trailing
+" semicolon is reached. 
+" -------------------------------------------------------------------
 " txb: if the first word on a new line in a parameter
 "      list is function or procedure, we loop. for now
 "      just stop the loop and return 0 for error.
 " txb: better fix will be to remember the last line
 "      but i'm not sure about state at all times so
 "      this works for now.
-" 
-" in all cases, the end of a definitin is found when the
-" trailing semicolon is reached. 
 function! g:FpcLastLineOfProcedureDef(for_lnum, for_cnum = 1)
   let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   let curr_cnum = type(a:for_cnum) == v:t_string ? col(a:for_cnum) : a:for_cnum
 
-  " sanity check
   let first_word = g:FpcGetFirstWord(curr_lnum)
   if first_word !~# '\vfpc(Procedure|Function)'
     return [0, 0]
@@ -287,7 +282,7 @@ function! g:FpcLastLineOfProcedureDef(for_lnum, for_cnum = 1)
     let s = search('\v(\;)|(\()|(\))', 'zpW', 0, 0, s:skip_contained)
     " 2 is ;, 3 is (, 4 is ) 
     if s == 2 && !nesting
-      let result = line('.')
+      let result = [line('.'), col('.')]
       break
     endif
     if s == 3
@@ -296,7 +291,7 @@ function! g:FpcLastLineOfProcedureDef(for_lnum, for_cnum = 1)
     if s == 4
       let nesting = nesting - 1
       if nesting < 0
-        let result = 0
+        let result = [0, 0]
         break
       endif
     endif
@@ -306,6 +301,8 @@ function! g:FpcLastLineOfProcedureDef(for_lnum, for_cnum = 1)
   return result
 endfunction
 
+
+" -------------------------------------------------------------------
 " search({pattern} [, {flags} [, {stopline} [, {timeout} [, {skip}]]]])
 "		'b'	search Backward instead of forward
 "		'c'	accept a match at the Cursor position
@@ -374,8 +371,10 @@ function! g:FpcStatementEnd(for_lnum)
   return -1
 endfunction
 
+
 " -------------------------------------------------------------------
 " is a line a preprocesosr directive? {$...} (*$...*) {##...} #
+" c++ style comments are not included.
 " -------------------------------------------------------------------
 function! g:FpcIsPreprocessing(curr_lnum, curr_line)
   return a:curr_line =~# '\v^\s*(((\{|\(\*)(\$|\#\#))|\#)'
@@ -588,14 +587,14 @@ function! g:FpcGetPrior(for_lnum)
     return 0
   endif
 
-  let prev_num = prevnonblank(curr_lnum - 1) 
-  let prev_word = g:FpcGetFirstWord(prev_num)
-  while prev_num != 0 && prev_word =~# '\v(Comment|String|Operator|Integer|Real|Delimiter)'
-    let prev_num = prevnonblank(prev_num - 1) 
-    let prev_word = g:FpcGetFirstWord(prev_num)
+  let prev_lnum = prevnonblank(curr_lnum - 1) 
+  let prev_word = g:FpcGetFirstWord(prev_lnum)
+  while prev_lnum != 0 && prev_word =~# '\v(Comment|String|Operator|Integer|Real|Delimiter)'
+    let prev_lnum = prevnonblank(prev_lnum - 1) 
+    let prev_word = g:FpcGetFirstWord(prev_lnum)
   endwhile
 
-  return prev_num
+  return prev_lnum
 endfunction
 
 
