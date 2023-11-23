@@ -1,6 +1,28 @@
 program testunit;
 { a comment }
 
+type
+  somerecord = record
+    i: integer;
+    s: string;
+  end;
+  psomerecord = ^somerecord;
+
+var
+  sr: psomerecord;
+
+function test0002(x: integer;
+                  t: string): psomerecord;
+var
+  nsr: psomerecord;
+begin
+  new(nsr);
+  with nsr^ do
+    i := x;
+  nsr^.s := t;
+  test0002 := nsr;
+end;
+
 { test allman style begin end under for }
 procedure test0000(a: integer; b: string);
 var
@@ -14,7 +36,7 @@ begin
 end;
 
 { test align after single statement for }
-procedure test0001(a: integer: b: string);
+procedure test0001(a: integer; b: string);
 var
   i: integer;
 begin
@@ -27,4 +49,5 @@ end;
 begin
   test0000(15, '*');
   test0001(32, 'F');
+  sr := test0002(32, 'asdf');
 end.
