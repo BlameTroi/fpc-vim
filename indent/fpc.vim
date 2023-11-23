@@ -22,6 +22,16 @@
 " keywords that influence code format and indent are given their
 " own highlight name in the syntax definiton. fpcIf, fpcThen, fpcDo,
 " fpcBegin, fpcEnd, and so on.
+"
+" pascal is freeform but indenting and formatting for readability
+" is line oriented. to keep things manageable this code assumes
+" that new statements always begin on a new line. a statement may
+" span multiple lines.
+"
+" since new statements are expected to start on a new line the
+" first word on a line tells us how to indent it. remember
+" that 'word' is the name of the syntax highlight group from
+" syntax/fpc.vim.
 " ===================================================================
 
 
@@ -35,7 +45,33 @@ let b:did_indent = 1
 let s:save_cpo = &cpo
 set cpo&vim
 
+
+" ------------------------------------------------------------------
+" indent doesn't fire without an expression.
+"
+" while indentkeys aren't being used at present, indentkeys uses
+" indentexpr and the = (filtering/formatter) uses it if equalprg
+" is not set.
+"
+" note the passing of v:lnum instead of using the global directly in
+" FpcGetIndent(). this allows testing from command mode. most 
+" functoins are set up to allow interactive testing via call or echo
+" and can accept marks as line numbers.
+" ------------------------------------------------------------------
+setlocal indentexpr=g:FpcGetIndent(v:lnum)
+
+
+" ------------------------------------------------------------------
+" indent and format options. these should be kept to a minimum and
+" moved to the plugin file when we're done.
+" ------------------------------------------------------------------
+
+" boolean should procedure and function definitions be indented?
+" defaults to false so that if the definitions are formatted for
+" documentation the alignment will be changed.
 let g:FpcIndentProcedureDefinitions = 0
+
+
 " ------------------------------------------------------------------
 " beyond the b:did and b:undo standards for plugins, these are
 " buffer local variables that are global to indenting. hoping
@@ -47,53 +83,105 @@ let g:FpcIndentProcedureDefinitions = 0
 " effects. variables should be narrowly scoped.
 "
 " any script scoped variable should be treated as a constant.
+"
+" txb: these are buffer scoped, do i need to unlet them?
 " ------------------------------------------------------------------
-function g:FpcInitBufferVars()
-  let b:indenting = 1
-  let b:last_indent_request = -1
+let b:indenting = 1
+let b:last_indent_request = -1
+
+
+" -------------------------------------------------------------------
+" a boundary word is one that marks a significant structural point
+" in pascal source code.  two match patterns are needed, one for
+" use with search functions to check synID names, and another to
+" search for these words at the head of a line of pascal source.
+" -------------------------------------------------------------------
+let s:match_boundary_word = '\vfpc(Program|Unit|Procedure|Function|Const|Type|Var|Label|Uses|Interface|Implementation|Initialization|Finalization)'
+let s:match_boundary_line = '\v\c^\s*<(procedure|function|label|var|program|unit|uses|const|type|interface|implementation|initialization|finalization)>'
+
+
+" -------------------------------------------------------------------
+" is a line a preprocessor directive? {$...} (*$...*) {##...} #
+" c++ style comments are not included.
+" -------------------------------------------------------------------
+let s:match_preprocessing_line = '\v^\s*(((\{|\(\*)(\$|\#\#))|\#)'
+
+
+" -------------------------------------------------------------------
+"  common highlight search patterns.
+" -------------------------------------------------------------------
+let s:frag_hl_name = 'synIDattr(synID(line(''.''),col(''.''),0),''name'')'
+let s:frag_contained = '''\vfpc(Comment|String)'''
+let s:skip_contained = s:frag_hl_name .. '=~#' .. s:frag_contained
+
+
+" -------------------------------------------------------------------
+" an indenting word is a pascal reserved word that influences its own
+" indent level, or that of lines that follow it.
+"
+" these are all indenting word syntax highlight names. this list must
+" be kept in alphabetical order. the function g:FpcIsIndentingWord
+" searches this list and counts on the ordering.
+" -------------------------------------------------------------------
+let s:fpc_indenting_words = [
+      \ 'fpcBegin',
+      \ 'fpcCase',
+      \ 'fpcClass',
+      \ 'fpcConst',
+      \ 'fpcDo',
+      \ 'fpcElse',
+      \ 'fpcEnd',
+      \ 'fpcFinalization',
+      \ 'fpcFor',
+      \ 'fpcFunction',
+      \ 'fpcGoto',
+      \ 'fpcIf',
+      \ 'fpcImplementation',
+      \ 'fpcInitialization',
+      \ 'fpcInterface',
+      \ 'fpcLabel',
+      \ 'fpcObject',
+      \ 'fpcPrivate',
+      \ 'fpcProcedure',
+      \ 'fpcProgram',
+      \ 'fpcPublic',
+      \ 'fpcRecord',
+      \ 'fpcRepeat',
+      \ 'fpcThen',
+      \ 'fpcType',
+      \ 'fpcUnit',
+      \ 'fpcUntil',
+      \ 'fpcUses',
+      \ 'fpcVar',
+      \ 'fpcWhile',
+      \ 'fpcWith',
+      \ ]
+
+
+" -------------------------------------------------------------------
+" check current highlight to see if it is an indenting word. returns
+" a true if the highlight name is found in s:fpc_indenting_words.
+" -------------------------------------------------------------------
+function! g:FpcIsIndentingWord(word)
+  for item in s:fpc_indenting_words
+    if item ==# a:word
+      return 1
+    endif
+    if item ># a:word
+      return 0
+    endif
+  endfor
+  return 0
 endfunction
 
 
-" ------------------------------------------------------------------
-" indent doesn't fire without an expression.
+" ==================================================================
 "
-" while indentkeys aren't being used at present, both indentkeys and
-" = (filtering) use indentexpr.
-"
-" note the passing of v:lnum instead of using the global directly in
-" FpcGetIndent(). this allows testing from command mode. most 
-" functoins are set up to allow interactive testing via call or echo
-" and can accept marks as line numbers.
-" ------------------------------------------------------------------
-call g:FpcInitBufferVars()
-setlocal indentexpr=g:FpcGetIndent(v:lnum)
-
-
-" ------------------------------------------------------------------
 " main indent function
 "
-" this code relies heavily on checking syntax highlighting in the
-" hope that 'reusing' the highlighter's pattern matches is faster
-" and more accurate that doing new pattern matches.
+" it's a bit busy but it's your basic target for indentexpr.
 "
-" pascal is freeform but indenting and formatting for readability
-" is line oriented. to keep things manageable this code assumes
-" that new statements always begin on a new line. a statement may
-" span multiple lines.
-"
-" since new statements are expected to start on a new line, the
-" first word on a line tells us how to indent it. for our
-" purposes, 'word' is the name of the syntax highlight group
-" from syntax/fpc.vim.
-"
-" following removed for debugging, but i may add back later:
-"
-"   return curr_indent == desired_indent ? -1 : desired_indent
-" replaced with
-"   return desired_indent
-" the ternary expression return is an optimistic optimization in
-" the hope that it might save vim/nvim a few cycles.
-" ------------------------------------------------------------------
+" ==================================================================
 function! g:FpcGetIndent(for_lnum)
   let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
 
@@ -102,8 +190,8 @@ function! g:FpcGetIndent(for_lnum)
     return 0
   endif
 
-  " attempt to avoid broken indenting or bad nesting of
-  " indent off/on directives from messing up indent
+  " don't let broken indenting or bad nesting of indent
+  " off/on directives mess things up too badly.
   if b:last_indent_request == -1
         \ || b:last_indent_request >= curr_lnum
     let b:indenting = 1
@@ -112,16 +200,15 @@ function! g:FpcGetIndent(for_lnum)
 
   let [curr_line, curr_indent] = [getline(curr_lnum), indent(curr_lnum)]
 
-  " preprocessor commands ALWAYS reset their own indent.
-  " here is where to process indent directives. b:indenting
-  " is only modified by directive in FpcIndentOffOnFlagging.
-  if g:FpcIsPreprocessing(curr_lnum, curr_line)
+  " preprocessor directives ALWAYS reset their own indent.
+  " indent off/on bracketing of lines is handled in another
+  " function where the buffer indent flag can be updated.
+  if curr_line =~? s:match_preprocessing_line
     call g:FpcIndentOffOnFlagging(curr_lnum, curr_line)
     return 0
   endif
 
-  " indent is unchanged if indenting is off or the line is
-  " a blank or comment line
+  " leave the line as is if blank, a comment, or indenting is off.
   if !b:indenting || curr_line =~# '\v(^$|^\s*$)' || g:FpcIsComment(curr_lnum)
     return -1
   endif
@@ -129,38 +216,46 @@ function! g:FpcGetIndent(for_lnum)
   " this line may be indentable.
   let curr_word = g:FpcGetFirstWord(curr_lnum)
 
-  " these lines all have hard left justification and are boundary
-  " lines when looking backward for indent guidance.
-  if g:FpcIsBoundaryWord(curr_word)
-    if !g:FpcIndentProcedureDefinitions && curr_word =~# '\vfpc(Procedure|function)'
+  " any of the boundary words (program, procedure, etc) will
+  " reset indenting. an exception is made for a procedure
+  " definition to preserve the layout of parameter lists.
+  " this is controlled by a global flag.
+  if curr_word =~# s:match_boundary_word
+    if !g:FpcIndentProcedureDefinitions && curr_word =~# '\vfpc(Procedure|Function)'
       return -1
     endif
     return 0
   endif
 
-  " indenting drives off a prior line. sometimes it's the line
-  " immediately prior, others it's a specific line.
+  " indent level for this line is based on the indent of the
+  " prior line. sometimes that's the line immediately prior,
+  " and others it's a specific line. eg. the opening begin
+  " of a procedure lines up under the procedure statement (or
+  " const/type/var/label). 
   let prev_lnum = g:FpcGetPrior(curr_lnum)
   let [prev_word, prev_indent] = [g:FpcGetFirstWord(prev_lnum), indent(prev_lnum)]
 
-  echomsg printf('dbg curr %d prev %d %s %d %s', curr_lnum, prev_lnum, prev_word, prev_indent, getline(prev_lnum))
   " do not rearrange function/procedure definitions that may be
   " pretty-printed for documentation formatting. 
   if prev_word =~# '\vfpc(Procedure|Function)'
         \ && !g:FpcIndentProcedureDefinitions 
         \ && curr_lnum <= g:FpcLastLineOfProcedureDef(prev_lnum)[0]
+    " txb: above call needs to recognize nesting of procs in paramlist
+    " txb: sometimes a var could align wrong in the parameter list
+    "      if it starts a new line and is preceeded by a procedure
+    "      reference.
     return -1
   endif
 
   " an outdenting word is one that will cause itself and following
-  " lines to outdent. end should line up under begin, and until
-  " should line up under repeat.
-
-  " every end has its beginning
-  "  or record ...
+  " lines to outdent. the easy case is until which lines up under
+  " repeat. then and else line up under if. end can close a begin,
+  " but also a record/object/class definition. that complexity is
+  " tucked away in another function.
   if curr_word =~# '\vfpc(End|Then|Else|Until)'
+    "echomsg printf('handling fpcEnd/Then/Else/Until at %d', curr_lnum)
     let prev_lnum = g:FpcGetPriorPair(curr_lnum, curr_word)
-    let prev_indent =indent(prev_lnum)
+    let prev_indent = indent(prev_lnum)
     return prev_indent
   endif
 
@@ -168,12 +263,25 @@ function! g:FpcGetIndent(for_lnum)
   " under the statement it provides a grouping for. if, for, etc.
   " fpcDo is deliberately excluded. stmt<nl>do<nl>begin<nl>...
   " is poor style.
-  if curr_word ==# 'fpcBegin' 
+  "
+  " the space from program or procedure/function to the begin
+  " that opens the program or procedure/function statement
+  " block needs special handling here to allow for the lack
+  " of explicit termination of things such as var or type
+  " blocks, and 'pretty' formatting of parameter lists.
+  if curr_word =~# '\vfpc(Begin|Const|Var|Type|Label)' 
+    "echomsg printf('handling fpcBegin at %d', curr_lnum)
     while prev_word !~# '\vfpc(For|While|If|Then|Else|With|End)' && !g:FpcIsBoundaryLine(prev_lnum)
       let prev_lnum = g:FpcGetPrior(prev_lnum)
-      let [prev_word, prev_indent] = [g:FpcGetFirstWord(prev_lnum), indent(prev_lnum)]
+      let prev_word = g:FpcGetFirstWord(prev_lnum)
     endwhile
-    return prev_indent
+    " while some pretty printing settings might allow these words to
+    " not be on the left margin, they logically are and so the
+    " indent for a block opener following them will be set to 0.
+    if prev_word =~# '\vfpc(Procedure|Function|Const|Type|Var|Label)'
+      return 0
+    endif
+    return indent(prev_lnum)
   endif
 
   " while taking the first word on a line works well, it doesn't
@@ -200,36 +308,38 @@ function! g:FpcGetIndent(for_lnum)
   " also not an indenting word. Otherwise, things get more 
   " interesting.
   if !g:FpcIsIndentingWord(prev_word)
+    "echomsg printf('non indenting word %s prior to %d', prev_word, curr_lnum)
     return prev_indent
   endif
 
   " these aren't really indenting words at this point.
+  " they outdent themselves.
+  " txb: consider, end, until, then, else, as outdent words
+  "      and actually process under that rubric.
   if prev_word =~# '\vfpc(End|Until)'
+    "echomsg printf('end or until seen prior to %d', curr_lnum)
     return prev_indent
   endif
 
-  " these words indent one level. while multiple could be on
-  " any one line, the indent is only one level. record, then,
-  " do, else should usually be on the same line as the
-  " statement they are a part of, while-do, if-then, and so
-  " on. however, they may appear as the first word of a line
-  " so we handle them here as well.
+  " these words indent one level. while more than one might be
+  " on a line, the indent is only one level. record, then, do,
+  " should usually be on the same line as the statement they
+  " are a part of, while-do, if-then, and so on. however, they
+  " may appear as the first word of a line so we handle them
+  " here as well.
+  " txb: see note on end/until ... we use a match instead of
+  "      the table driven function because of end and until.
   if prev_word =~# '\vfpc(Begin|Label|Const|Type|Var|If|For|While|With|Repeat|Case|Then|Else|Uses|Record|Do|Object|Class)'
+    "echomsg printf('indenting word %s seen prior to %d', prev_word, curr_lnum)
     return prev_indent + &shiftwidth
   endif
 
-  echomsg printf('FpcGetIndent: confusion at %d %s', curr_lnum, curr_line)
-"  " record, begin, and do sometimes suffix a continuation
-"  " statement. use simple matching to see if we have that
-"  " siuation. note that this is a text match against the
-"  " actual previoius line, not its highlighting. 
-"  let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_lnum)))
-"  if prev_line =~? '\v<(then|else|do|begin|record|object|class)$'
-"    return prev_indent + &shiftwidth
-"  endif
-
   " if we get here, it's a hole in the bucket situation
-  echoerr printf('FpcGetIndent: lines unrecognized at current: %d %s previous: %d %s', curr_lnum, curr_word, prev_lnum, prev_word)
+  " txb: echoerr and echohl aren't showing up in message history.
+  " it isn't clear what causes this and looking at the discussions
+  " on issues for nvim on github, i've decided to just live with
+  " echomsg.
+  echomsg printf('lines unrecognized at current: %d [%s] previous: %d [%s]', curr_lnum, curr_word, prev_lnum, prev_word)
   return prev_indent
 
 endfunction
@@ -316,42 +426,7 @@ endfunction
 "
 " finding statement start ok on if and deep in a proc, but there
 " are issues at front of proc
-"
-" also, col numbers are looking weird, need to trace
-function! g:FpcStatementStart(for_lnum)
-  let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
-  let save_cursor = getcurpos()
-  call cursor(curr_lnum, 1)
-  let result_first_word = 'UNKNOWN'
-  let result_start_line = 0
-  let result_start_col = 0
-  let result_end_line = 0
-  let result_end_col = 0
-  let semi_at = search('\v\;', 'bW', 0, 1000, s:skip_contained)
-  if semi_at == 0
-    call cursor(save_cursor[1], save_cursor[2])
-    return [result_first_word, 0, 0, 0, 0]
-  endif
-  let result_end_line = line('.')
-  let result_end_col = col('.')
-  let semi_at = search('\v\;', 'bW', 0, 1000, s:skip_contained)
-  if semi_at == 0
-    call cursor(save_cursor[1], save_cursor[2])
-    return [result_first_word, 0, 0, result_end_line, result_end_col]
-  endif
-  let semi_at = search('\v\S', 'zW', curr_lnum, s:skip_contained)
-  if semi_at == 0
-    call cursor(save_cursor[1], save_cursor[2])
-    return [result_first_word, 0, 0, result_end_line, result_end_col]
-  endif
-  let result_start_line = line('.')
-  let result_start_col = col('.')
-  call cursor(save_cursor[1], save_cursor[2])
-  let result_first_word = g:FpcGetWordAt(result_start_line, result_start_col)
-  return [result_first_word, result_start_line, result_start_col, result_end_line, result_end_col]
-endfunction
-
-
+" -------------------------------------------------------------------
 function! g:FpcTestSearch(for_lnum, for_cnum, for_pat, for_flag)
   let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   let curr_col = type(a:for_cnum) == v:t_string ? col(a:for_cnum) : a:for_cnum
@@ -365,19 +440,6 @@ function! g:FpcTestSearch(for_lnum, for_cnum, for_pat, for_flag)
         \ result, line('.'), col('.'),
         \ g:FpcGetWordAt(line('.'), col('.')))
   call cursor(save_cursor[1], save_cursor[2])
-endfunction
-
-function! g:FpcStatementEnd(for_lnum)
-  return -1
-endfunction
-
-
-" -------------------------------------------------------------------
-" is a line a preprocesosr directive? {$...} (*$...*) {##...} #
-" c++ style comments are not included.
-" -------------------------------------------------------------------
-function! g:FpcIsPreprocessing(curr_lnum, curr_line)
-  return a:curr_line =~# '\v^\s*(((\{|\(\*)(\$|\#\#))|\#)'
 endfunction
 
 
@@ -432,12 +494,16 @@ function! g:FpcGetFirstWord(for_lnum)
   return result
 endfunction
 
+
+" -------------------------------------------------------------------
 function! g:FpcGetWordAt(for_lnum, for_cnum)
   let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   let curr_cnum = type(a:for_cnum) == v:t_string ? col(a:for_cnum) : a:for_cnum
   return  synIDattr(synID(curr_lnum, curr_cnum, 0), 'name')
 endfunction
   
+
+" -------------------------------------------------------------------
 " find first word (nonspace character not in string or
 " comment) after a specific line, col. the cursor is
 " not preserved. the 'word' is the syntax highlight
@@ -467,9 +533,6 @@ endfunction
 " some class directives may need to be added here. public, private,
 " static?
 " -------------------------------------------------------------------
-
-let s:match_boundary_line = '\v\c^\s*<(procedure|function|label|var|program|unit|uses|const|type|interface|implementation|initialization|finalization)>'
-
 function! g:FpcFindSearchBoundary(for_lnum)
   let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   if curr_lnum == 0
@@ -504,81 +567,20 @@ endfunction
 
 
 " -------------------------------------------------------------------
-" all indenting word highlights, kept in alphabetical order please!
-" -------------------------------------------------------------------
-let s:fpc_indenting_words = [
-      \ 'fpcBegin',
-      \ 'fpcCase',
-      \ 'fpcClass',
-      \ 'fpcConst',
-      \ 'fpcDo',
-      \ 'fpcElse',
-      \ 'fpcEnd',
-      \ 'fpcFinalization',
-      \ 'fpcFor',
-      \ 'fpcFunction',
-      \ 'fpcGoto',
-      \ 'fpcIf',
-      \ 'fpcImplementation',
-      \ 'fpcInitialization',
-      \ 'fpcInterface',
-      \ 'fpcLabel',
-      \ 'fpcObject',
-      \ 'fpcPrivate',
-      \ 'fpcProcedure',
-      \ 'fpcProgram',
-      \ 'fpcPublic',
-      \ 'fpcRecord',
-      \ 'fpcRepeat',
-      \ 'fpcThen',
-      \ 'fpcType',
-      \ 'fpcUnit',
-      \ 'fpcUntil',
-      \ 'fpcUses',
-      \ 'fpcVar',
-      \ 'fpcWhile',
-      \ 'fpcWith',
-      \ ]
-
-
-" -------------------------------------------------------------------
-" check current highlight to see if it is an indenting word
-" -------------------------------------------------------------------
-function! g:FpcIsIndentingWord(word)
-  for item in s:fpc_indenting_words
-    if item ==# a:word
-      return 1
-    endif
-    if item ># a:word
-      return 0
-    endif
-  endfor
-  return 0
-endfunction
-
-
-" -------------------------------------------------------------------
-" a boundary word is one that marks a significant structural point
-" in pascal source code.
-" -------------------------------------------------------------------
-function! g:FpcIsBoundaryWord(word)
-  return a:word =~# '\vfpc(Program|Unit|Procedure|Function|Const|Type|Var|Label|Uses|Interface|Implementation|Initialization|Finalization)'
-endfunction
-
-
-" -------------------------------------------------------------------
 " a boundary line is one that ends a backward search. 
 " -------------------------------------------------------------------
 function! g:FpcIsBoundaryLine(for_lnum)
   let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   return curr_lnum < 1 ||
-        \ curr_lnum > line('.') ||
-        \ g:FpcIsBoundaryWord(g:FpcGetFirstWord(curr_lnum))
+        \ g:FpcGetFirstWord(curr_lnum) =~# s:match_boundary_word
 endfunction
 
 
 " -------------------------------------------------------------------
-" find prior code line 
+" find prior code line. returns the number of the line before the
+" passed line that is neither blank nor a comment. lines that look
+" like goto labels or continued lines holding parts of an expression
+" are also skipped. 
 " -------------------------------------------------------------------
 function! g:FpcGetPrior(for_lnum)
   let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
@@ -589,7 +591,7 @@ function! g:FpcGetPrior(for_lnum)
 
   let prev_lnum = prevnonblank(curr_lnum - 1) 
   let prev_word = g:FpcGetFirstWord(prev_lnum)
-  while prev_lnum != 0 && prev_word =~# '\v(Comment|String|Operator|Integer|Real|Delimiter)'
+  while prev_lnum != 0 && prev_word =~# '\vfpc(Comment|String|Operator|Integer|Real|Delimiter)'
     let prev_lnum = prevnonblank(prev_lnum - 1) 
     let prev_word = g:FpcGetFirstWord(prev_lnum)
   endwhile
@@ -598,14 +600,6 @@ function! g:FpcGetPrior(for_lnum)
 endfunction
 
 
-
-" -------------------------------------------------------------------
-"  common highlight search patterns.
-" -------------------------------------------------------------------
-let s:frag_hl_name = 'synIDattr(synID(line(''.''),col(''.''),0),''name'')'
-let s:frag_contained = '''\v\cfpc(comment|string)'''
-let s:skip_contained = s:frag_hl_name .. '=~' .. s:frag_contained
-let s:accept_contained = '!(' .. s:skip_contained .. ')'
 
 
 " ------------------------------------------------------------------
