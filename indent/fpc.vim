@@ -171,32 +171,6 @@ let s:skip_contained = s:frag_hl_name .. '=~#' .. s:frag_contained
 " match variable := 
 let s:match_identifier_becomes = '\v^\s*\h\w*\s*\:\='
 
-" match case branch label
-" what a mess ... any one style works, can't get all three,
-" much less allowing for mixing of styles ...
-" need to support literal number and string, and possibly
-" comma delimited list
-"let s:match_case_branch = '\v^\s*\%(' ..
-"      \ '\%((\h\w*\s*)(\,\s*\h\w*\s*)*)' ..
-"      \ ')\:[^=]'
-"      \ '|\%((\d*)(\,\s*\d*)*)' ..
-"      \ '|\%((\'.\')(\,\s*\'.\')*)' .. outer ' double pls
-"
-" match error '\v^\"\s*(\h\w*\s*)\:[^=]'
-" '\v^"\s*((\h\w*\s*)(\,\s*\h\w*\s*)*)\:[^=]'
-" '\v^"\s*((\d*)(\,\s*\d*)*)\:[^=]'
-" '\v^"\s*((\'.\')(\,\s*\'.\')*)\:[^=]'
-"case fred of
-"'a': writeln;
-"'b', 'c': readln;
-"9: page;
-"7,6: subtract;
-"bambam := 7;
-"betty : boink;
-"wilma: begin .... end;
-"dino, bird, dawg: begin .... end;
-"else: begin .... end;
-
 " match typename definition
 let s:match_typename_definition = '\v([a-zA-Z_][a-zA-Z0-9_]*\s*)\='
 
@@ -691,29 +665,6 @@ endfunction
 
 
 " -------------------------------------------------------------------
-" find first word (nonspace character not in string or comment) after
-" a specific line, col. the cursor is not preserved. 'word' is the
-" syntax highlight name for the character. 
-" -------------------------------------------------------------------
-"function! g:FpcCursorStartNextWord(for_lnum, for_cnum = 1)
-"  let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
-"  let curr_cnum = type(a:for_cnum) == v:t_string ? col(a:for_cnum) : a:for_cnum
-"  if curr_lnum == 0 || curr_lnum > line('$') || curr_cnum < 1
-"    return 'ERROR-UNKNOWN'
-"  endif
-"  let result = 0
-"  call cursor(curr_lnum, curr_cnum)
-"  let at_line = search('\v\S', 'czW', 0, 0, s:skip_contained)
-"  if at_line == 0
-"    let result = 'ERROR-UNKNOWN'
-"  else
-"    let result = synIDattr(synID(line('.'), col('.'), 0), 'name')
-"  endif
-"  return result
-"endfunction
-
-
-" -------------------------------------------------------------------
 " a boundary line is one that ends a backward search. there's no 
 " point in looking back past a procedure statement, etc.
 " -------------------------------------------------------------------
@@ -722,47 +673,6 @@ function! g:FpcIsBoundaryLine(for_lnum)
   return curr_lnum < 1 ||
         \ g:FpcGetFirstWord(curr_lnum) =~# s:match_boundary_word
 endfunction
-
-
-" -------------------------------------------------------------------
-" find a hard boundary line to end backward searches. these lines
-" mark the start of code units such as procedures or sections in
-" a unit. returns 0 on error or not found.
-"
-" some class directives may need to be added here. public, private,
-" static?
-" -------------------------------------------------------------------
-"function! g:FpcFindSearchBoundary(for_lnum)
-"  let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
-"  if curr_lnum == 0
-"    return 0
-"  endif
-"  let save_cursor = getcurpos()
-"  call cursor(curr_lnum, 1)
-"  let prior_num = search(s:match_boundary_line, 'bW', 1, 0, s:skip_contained)
-"  call cursor(save_cursor[1], save_cursor[2])
-"  return prior_num > 0 ? prior_num : 0
-"endfunction
-
-
-" -------------------------------------------------------------------
-" many functions want line numbers but could be passed marks. for
-" testing during development, passing raw text (eg, to FpcIs...)
-" is worthwhile. this is a dwim helper. marks ., $, <, >, and a-z
-" are supported.
-" -------------------------------------------------------------------
-" txb: wire this in
-"function! g:FpcTextOrNumberFrom(arg)
-"  if type(a:arg) == v:t_number
-"    return a:arg
-"  endif
-"  if type(a:arg) != v:t_string
-"    return 0
-"  endif
-"  return a:arg =~ '\v^(\.|\$)|(\''[a-z<>])'
-"        \ ? line(a:arg)
-"        \ : a:arg
-"endfunction
 
 
 " -------------------------------------------------------------------
@@ -902,24 +812,6 @@ endfunction
 " in indent off/on.
 vnoremap <localleader>wi x:call g:FpcWrapIndentOffOn()<enter>""P
 
-
-" ------------------------------------------------------------------
-" test helpers
-" ------------------------------------------------------------------
-"function! g:FpcIsVarOrType(for_lnum)
-"  let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
-"  if curr_lnum == 0
-"    return 0
-"  endif
-"  let curr_line = line(curr_lnum)
-"  if curr_line =~ '\v\c^\s*[a-z_][a-z0-9_]*>\s*\='
-"    return 1
-"  endif
-"  if curr_line =~ '\v\c^\s*[a-z_][a-z0-9_]*>\s*\:[^=]'
-"    return 2
-"  endif
-"  return 0
-"endfunction
 
 function! FpcTestMatch(seeking)
   let i = 1
