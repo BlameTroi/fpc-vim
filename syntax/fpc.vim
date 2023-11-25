@@ -41,7 +41,15 @@ syntax match fpcReal "-\=\<\d\+[eE][+-]\=\d\+\>"
 " the keyword operators. delimiter : needs to be
 " defined in front of operator := to avoid hilighting
 " := in two colors.
-syntax match fpcDelimiter "[\,\;\:\(\)]"
+"
+" i'm seeing some highlight bleeding when looking at
+" fpc library code "variable:sometype" will have ":s"
+" highlighted as delimiter. i tried some tweaks here
+" and broke out delimiters since i will need to at
+" some point, but could not fix the bad highlight.
+syntax match fpcComma ","
+syntax match fpcLParen "("
+syntax match fpcRParen ")"
 syntax match fpcSemicolon "\;"
 syntax match fpcColon     "\:[^=]"
 syntax match fpcOperator "[+\-/*=]"
@@ -174,8 +182,8 @@ highlight default link fpcIoFunctions Function
 highlight default link fpcIoProcedures Function
 highlight default link fpcIdentifier Identifier
 highlight default link fpcInteger Number
-highlight default link fpcOperator Operator
-highlight default link fpcBecomes Operator
+highlight default link fpcOperator Delimiter
+highlight default link fpcBecomes Delimiter
 highlight default link fpcReal Number
 highlight default link fpcString String
 highlight default link fpcTypes Type
