@@ -23,6 +23,14 @@ begin
   test0002 := nsr;
 end;
 
+procedure if002(i, j: integer);
+begin
+  if i < j
+  then
+    writeln(i);
+    writeln('should outdent');
+end;
+
 { test allman style begin end under for }
 procedure test0000(a: integer; b: string);
 var

@@ -42,8 +42,10 @@ syntax match fpcReal "-\=\<\d\+[eE][+-]\=\d\+\>"
 " defined in front of operator := to avoid hilighting
 " := in two colors.
 syntax match fpcDelimiter "[\,\;\:\(\)]"
+syntax match fpcSemicolon "\;"
+syntax match fpcColon     "\:[^=]"
 syntax match fpcOperator "[+\-/*=]"
-syntax match fpcOperator ":="
+syntax match fpcBecomes ":="
 syntax match fpcOperator "<>"
 syntax match fpcOperator "<="
 syntax match fpcOperator "<"
@@ -135,13 +137,14 @@ syntax keyword fpcTypes boolean char integer real
 syntax keyword fpcFunctions abs arctan cos exp ln sin sqr sqrt 
 syntax keyword fpcFunctions trunc round
 syntax keyword fpcFunctions chr ord pred succ
-syntax keyword fpcFunctions odd eof eoln
-syntax keyword fpcFunctions new dispose
+syntax keyword fpcFunctions odd
+syntax keyword fpcProcedures new dispose
 
 
 " standard required input output
-syntax keyword fpcIoFunctions read readln reset rewrite write writeln
-syntax keyword fpcIoFunctions get put page
+syntax keyword fpcIoFunctions eof eoln
+syntax keyword fpcIoProcedures read readln reset rewrite write writeln
+syntax keyword fpcIoProcedures get put page
 
 
 " obvious non-optional extensions
@@ -150,8 +153,8 @@ syntax keyword fpcExtDirectives property static abstract virual dynamic
 syntax keyword fpcExtDirectives override overload
 syntax keyword fpcExtTypes string ansistring
 syntax keyword fpcExtTypes shortint longint
-syntax keyword fpcExtFunctions assign close length
-syntax keyword fpcExtFunctions high low setlength
+syntax keyword fpcExtFunctions high low length
+syntax keyword fpcExtProcedures assign close setlength
 syntax keyword fpcExtWords break continue exit result
 
 
@@ -165,15 +168,20 @@ highlight default link fpcComment Comment
 highlight default link fpcConstants Constant
 highlight default link fpcDirectives Keyword
 highlight default link fpcFunctions Function
+highlight default link fpcProcedures Function
 highlight default link fpcIoFunctions Function
+highlight default link fpcIoProcedures Function
 highlight default link fpcIdentifier Identifier
 highlight default link fpcInteger Number
 highlight default link fpcOperator Operator
+highlight default link fpcBecomes Operator
 highlight default link fpcReal Number
 highlight default link fpcString String
 highlight default link fpcTypes Type
 highlight default link fpcWords Keyword
 highlight default link fpcDelimiters Delimiter
+highlight default link fpcSemicolon Delimiter
+highlight default link fpcColon Delimiter
 
 
 " these are more fine grained for use in synIDattr suppported
@@ -216,6 +224,7 @@ highlight default link fpcExtConstants Constant
 highlight default link fpcExtDirectives Keyword
 highlight default link fpcExtExcept Keyword
 highlight default link fpcExtFunctions Function
+highlight default link fpcExtProcedures Function
 highlight default link fpcExtTypes Type
 highlight default link fpcExtWords Keyword
 
