@@ -138,21 +138,23 @@ let b:last_indent_request = -1
 " pascal source code.  two match patterns are needed, one for use
 " with search functions to check synID names, and another to search
 " for these words at the head of a line of pascal source.
+let s:frag_boundary_highlight = '(' ..
+      \ 'Procedure|Function|Definitions' ..
+      \ ')'
 let s:frag_boundary_word = '(' ..
       \ 'Program|Unit|Procedure|Function|Const' ..
       \ '|Type|Var|Label|Uses|Interface|Implementation' ..
       \ '|Initialization|Finalization' ..
       \ ')'
-let s:match_boundary_word = '\vfpc' .. s:frag_boundary_word
+let s:match_boundary_word = '\vfpc' .. s:frag_boundary_highlight
 let s:match_boundary_line = '\v\c^\s*<' .. s:frag_boundary_word .. '>'
 
 " a small attempt at optimizing the expression based on expected
 " frequency of keywords in source and the hope that the search
 " is left to right.
 let s:match_statement_starters = '\vfpc(' ..
-      \ 'If|For|While|With|ExtProcedures|ExtWords' ..
-      \ '|IoProcedures|Procedures|Repeat|Until' ..
-      \ '|Begin|Case|ExtExcept' ..
+      \ 'Begin|Case|For|If|While|With|Words' ..
+      \ '|BuiltInProcs|Definitions|Exceptions' ..
       \ ')'
 
 " is a line a preprocessor directive? {$...} (*$...*) {##...} #
@@ -198,31 +200,15 @@ let s:fpc_outdenting_words = [
 let s:fpc_indenting_words = [
       \ 'fpcBegin',
       \ 'fpcCase',
-      \ 'fpcClass',
-      \ 'fpcConst',
-      \ 'fpcDo',
+      \ 'fpcDefinitions',
       \ 'fpcElse',
-      \ 'fpcFinalization',
       \ 'fpcFor',
       \ 'fpcFunction',
       \ 'fpcGoto',
       \ 'fpcIf',
-      \ 'fpcImplementation',
-      \ 'fpcInitialization',
-      \ 'fpcInterface',
-      \ 'fpcLabel',
-      \ 'fpcObject',
-      \ 'fpcPrivate',
       \ 'fpcProcedure',
-      \ 'fpcProgram',
-      \ 'fpcPublic',
-      \ 'fpcRecord',
       \ 'fpcRepeat',
       \ 'fpcThen',
-      \ 'fpcType',
-      \ 'fpcUnit',
-      \ 'fpcUses',
-      \ 'fpcVar',
       \ 'fpcWhile',
       \ 'fpcWith',
       \ ]
@@ -331,7 +317,7 @@ function! g:FpcGetIndent(for_lnum)
   " do not rearrange function/procedure definitions that may be
   " pretty-printed for documentation formatting. 
   if !g:FpcIndentProcedureDefinitions &&
-        \ prev_word =~# '\vfpc(Procedure|Function|Var)'
+        \ prev_word =~# '\vfpc(Procedure|Function|Definitions)'
         \ && curr_lnum <= g:FpcLastLineOfProcedureDef(prev_lnum)[0]
     return -1
   endif
@@ -355,7 +341,7 @@ function! g:FpcGetIndent(for_lnum)
   " special handling here to allow for the lack of explicit
   " termination of things such as var or type blocks, and pretty-
   " printing of parameter lists.
-  if curr_word =~# '\vfpc(Begin|Const|Var|Type|Label|Do)' 
+  if curr_word =~# '\vfpc(Begin|Definitions)' 
     while prev_word !~# '\vfpc(For|While|If|Then|Else|With|End)' && !g:FpcIsBoundaryLine(prev_lnum)
       let prev_lnum = g:FpcGetPrior(prev_lnum)
       let prev_word = g:FpcGetFirstWord(prev_lnum)
@@ -363,11 +349,13 @@ function! g:FpcGetIndent(for_lnum)
     " while some pretty printing settings might allow these words to
     " not be on the left margin, they logically are and so the indent
     " for a block opener following them will be set to 0.
-    if prev_word =~# '\vfpc(Procedure|Function|Const|Type|Var|Label)'
+    if prev_word =~# '\vfpc(Procedure|Function|Definitions)'
       return 0
     endif
     return indent(prev_lnum)
   endif
+  "echomsg printf('curr %d %s %d %d   prev %d %s %d %d', curr_lnum, curr_word, curr_indent, curr_is_new_stmt, prev_lnum, prev_word, prev_indent, prev_is_new_stmt)
+  "echomsg printf('curr %s  is out %d  is bi %d', curr_word, g:FpcIsOutdenting(curr_word), g:FpcIsBidenting(curr_word))
 
   " while taking the first word on a line works well, it doesn't for
   " record/object/class. since these all need to trigger an indent,
@@ -376,11 +364,11 @@ function! g:FpcGetIndent(for_lnum)
   let prev_line = g:FpcStripComments(g:FpcStripStrings(getline(prev_lnum)))
   if !g:FpcIsIndenting(prev_word)
     if prev_line =~? '\v<record$'
-      let prev_word = 'fpcRecord'
+      let prev_word = 'fpcDefinitions'
     elseif prev_line =~? '\v<object$' || prev_line =~ '\v<object\s*\(.*\)$'
-      let prev_word = 'fpcObject'
+      let prev_word = 'fpcDefinitions'
     elseif prev_line =~? '\v<class$' || prev_line =~ '\v<class\s*\(.*\)$'
-      let prev_word = 'fpcClass'
+      let prev_word = 'fpcDefinitions'
     endif
   endif
 
@@ -433,7 +421,7 @@ endfunction
 function! g:FpcStartsNewStatement(for_lnum, for_word)
   let curr_lnum = type(a:for_lnum) == v:t_string ? line(a:for_lnum) : a:for_lnum
   return a:for_word =~# s:match_boundary_word || 
-        \ a:for_word =~#  s:match_statement_starters ||
+        \ a:for_word =~# s:match_statement_starters ||
         \ (a:for_word =~# '\vfpcIdentifier' &&
         \ getline(curr_lnum) =~# s:match_identifier_becomes)
 endfunction
