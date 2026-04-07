@@ -1,5 +1,7 @@
 # fpc-vim -- a narrowly focused Pascal mode for vim
 
+>Archiving, this work is best done using TreeSitter and a Language Server. If I ever pick this back up it will be on some other forge. Troy Brumley, 07 April 2026
+
 Most support for modern Pascal seems wedded to the Delphi and Lazarus environments, combining language extensions and forms based development with large visual IDEs. Those are all excellent tools, but I just want to use Object Pascal (`mode:objfpc`) from the Free Pascal Compiler (`fpc`) for non-forms based programming. I like terminal and command line interfaces for a more old school feel. After several attempts to get the default Pascal support in base Vim working for me, I decided to bite the bullet, learn Vimscript, and roll my own language plugin.
 
 Being retired, I have no project managers yelling at me to meet deadlines and stop writing tools instead of product. It's a satisfying life and one that allows me to take time to learn something old that's new to me. It also allows me to start over...more than once.
